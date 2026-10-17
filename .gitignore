@@ -7,6 +7,23 @@ node_modules/
 dist/
 release/
 build/
+out/
+dist-electron/
+*.exe
+*.msi
+*.zip
+*.7z
+*.tar.gz
+*.blockmap
+
+# Test, scratch and binary artifacts
+test_*.js
+scratch/
+bin/
+*.bin
+*.tmp
+.env*
+.env.local
 
 # Logs and Diagnostics
 *.log
@@ -33,3 +50,4 @@ temp/
 *.sw?
 .DS_Store
 Thumbs.db
+

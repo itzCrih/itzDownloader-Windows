@@ -49,6 +49,118 @@ function isDomainAllowed(targetUrl = '') {
   }
 }
 
+function validateMediaUrl(targetUrl = '') {
+  const clean = (targetUrl || '').trim();
+  if (!clean) return { isValid: false, error: 'Please enter a URL.' };
+
+  let parsed;
+  try {
+    parsed = new URL(clean.startsWith('http://') || clean.startsWith('https://') ? clean : `https://${clean}`);
+  } catch (e) {
+    return { isValid: false, error: 'The entered text is not a valid URL.' };
+  }
+
+  const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
+  const pathname = parsed.pathname.toLowerCase().replace(/\/+$/, '');
+  const search = parsed.search.toLowerCase();
+
+  if (!isDomainAllowed(clean)) {
+    return {
+      isValid: false,
+      error: 'This domain is not in the verified whitelist. Only safe, trusted platforms (YouTube, TikTok, Spotify, Instagram, Twitter, etc.) are allowed.',
+    };
+  }
+
+  // Root domain check (e.g. https://youtube.com, https://tiktok.com, https://open.spotify.com)
+  if ((pathname === '' || pathname === '/') && !search) {
+    return {
+      isValid: false,
+      error: `You entered the home page (${host}). Please provide a direct link to a video, song, reel, or track.`,
+    };
+  }
+
+  if (host === 'youtube.com' || host === 'm.youtube.com' || host === 'music.youtube.com') {
+    const isVideo = pathname === '/watch' && (parsed.searchParams.has('v') || search.includes('v='));
+    const isShort = pathname.startsWith('/shorts/');
+    const isLive = pathname.startsWith('/live/');
+    const isEmbed = pathname.startsWith('/embed/');
+    const isPlaylist = pathname === '/playlist' && (parsed.searchParams.has('list') || search.includes('list='));
+
+    if (pathname.startsWith('/@') || pathname.startsWith('/channel/') || pathname.startsWith('/c/') || pathname.startsWith('/user/')) {
+      return {
+        isValid: false,
+        error: 'This link points to a YouTube channel or creator profile. Please provide a direct video or shorts link.',
+      };
+    }
+    if (pathname.startsWith('/feed') || pathname.startsWith('/trending') || pathname.startsWith('/explore')) {
+      return {
+        isValid: false,
+        error: 'This link points to a YouTube feed tab, not a downloadable video.',
+      };
+    }
+    if (!isVideo && !isShort && !isLive && !isEmbed && !isPlaylist) {
+      return {
+        isValid: false,
+        error: 'Please enter a valid YouTube video link (e.g. https://youtube.com/watch?v=... or https://youtu.be/...)',
+      };
+    }
+  } else if (host === 'youtu.be') {
+    if (pathname === '' || pathname === '/') {
+      return { isValid: false, error: 'Please provide a valid youtu.be video link with a video ID.' };
+    }
+  }
+
+  if (host === 'tiktok.com' || host.endsWith('.tiktok.com')) {
+    if (pathname.startsWith('/@') && !pathname.includes('/video/') && !pathname.includes('/photo/')) {
+      return {
+        isValid: false,
+        error: 'This link points to a TikTok user profile. Please provide a direct link to a TikTok video or sound.',
+      };
+    }
+    if (pathname === '/foryou' || pathname === '/explore' || pathname === '/live') {
+      return {
+        isValid: false,
+        error: 'This link points to a TikTok feed tab. Please provide a direct video link.',
+      };
+    }
+  }
+
+  if (host === 'spotify.com' || host.endsWith('.spotify.com')) {
+    const isTrack = pathname.startsWith('/track/');
+    const isAlbum = pathname.startsWith('/album/');
+    const isPlaylist = pathname.startsWith('/playlist/');
+    const isEpisode = pathname.startsWith('/episode/');
+    if (!isTrack && !isAlbum && !isPlaylist && !isEpisode) {
+      return {
+        isValid: false,
+        error: 'Please provide a direct Spotify track, album, or playlist link (e.g. open.spotify.com/track/...)',
+      };
+    }
+  }
+
+  if (host === 'instagram.com' || host.endsWith('.instagram.com')) {
+    const isPost = pathname.startsWith('/p/') || pathname.startsWith('/reel/') || pathname.startsWith('/reels/') || pathname.startsWith('/tv/');
+    if (!isPost) {
+      return {
+        isValid: false,
+        error: 'This link points to an Instagram profile or feed. Please provide a direct reel, post, or video link.',
+      };
+    }
+  }
+
+  if (host === 'twitter.com' || host === 'x.com') {
+    const isStatus = pathname.includes('/status/');
+    if (!isStatus) {
+      return {
+        isValid: false,
+        error: 'This link points to a Twitter/X profile or feed. Please provide a direct tweet or post link containing media.',
+      };
+    }
+  }
+
+  return { isValid: true };
+}
+
 function formatYtDlpError(errText = '') {
   const e = (errText || '').toLowerCase();
   if (e.includes('sign in to confirm your age') || e.includes('confirm you’re not a bot') || e.includes('sign in to confirm you’re not a bot')) {
@@ -75,7 +187,22 @@ function formatYtDlpError(errText = '') {
   if (e.includes('georestricted') || e.includes('not available in your country')) {
     return 'This content is geo-blocked by the uploader in your region.';
   }
-  return errText.split(/\r?\n/)[0] || 'Download failed. Please check the URL and network connection.';
+  if (e.includes('not a valid url') || e.includes('unsupported url')) {
+    return 'The provided link is not recognized as a valid supported media URL.';
+  }
+  if (e.includes('404') || e.includes('not found')) {
+    return 'Media not found (404). Please verify that the link is correct and still online.';
+  }
+  if (e.includes('copyright') || e.includes('takedown')) {
+    return 'This media has been taken down due to a copyright claim.';
+  }
+  if (e.includes('connection refused') || e.includes('network is unreachable') || e.includes('timed out')) {
+    return 'Network connection error. Please verify your internet connection.';
+  }
+  if (e.includes('drm') || e.includes('encrypted')) {
+    return 'This stream is DRM-protected and cannot be extracted.';
+  }
+  return errText.split(/\r?\n/)[0] || 'Inspection failed. Please check the URL and network connection.';
 }
 
 class Downloader {
@@ -98,8 +225,9 @@ class Downloader {
     }
     const cleanUrl = targetUrl.trim();
 
-    if (!isDomainAllowed(cleanUrl)) {
-      throw new Error('This domain is not in the verified whitelist. Only safe, trusted platforms (YouTube, TikTok, Spotify, Instagram, Twitter, SoundCloud, Twitch, etc.) are allowed.');
+    const validation = validateMediaUrl(cleanUrl);
+    if (!validation.isValid) {
+      throw new Error(validation.error);
     }
 
     // 1. Check for Spotify URLs
@@ -153,6 +281,18 @@ class Downloader {
 
         try {
           const info = JSON.parse(stdout);
+
+          // Proactive guard against playlist tabs, channel profiles, or empty recommendations feeds
+          if (info.extractor && (info.extractor.includes(':tab') || info.extractor.includes(':channel'))) {
+            return reject(new Error(`The provided link points to a channel or recommendations tab ("${info.title || 'Tab'}"), not a downloadable video.`));
+          }
+          if (info.title && ['recommended', 'home', 'feed', 'trending', 'explore'].includes(info.title.toLowerCase().trim())) {
+            return reject(new Error('This link points to a recommendations feed, not a downloadable video. Please provide a direct video link.'));
+          }
+          if ((!info.formats || info.formats.length === 0) && !info.url && !info.direct_url) {
+            return reject(new Error('No downloadable video or audio streams were found for this media link.'));
+          }
+
           const platform = this._detectPlatform(cleanUrl, info.extractor);
 
           // Extract unique resolution formats
@@ -369,6 +509,7 @@ class Downloader {
       format = 'mp4',
       resolution = 'best',
       fastReencode = false,
+      noAudio = false,
       audioFormat = 'mp3',
       audioBitrate = '320k',
       embedThumbnail = true,
@@ -409,6 +550,7 @@ class Downloader {
             jobConfig,
             tikTokInfo.title,
             fastReencode,
+            noAudio,
             onProgress,
             onLog
           );
@@ -505,19 +647,40 @@ class Downloader {
         }
         if (embedThumbnail) args.push('--embed-thumbnail');
       } else {
-        if (resolution !== 'best') {
-          const h = parseInt(resolution, 10);
-          if (h > 0) {
-            args.push('-f', `bv*[height<=${h}]+ba/b[height<=${h}] / bv*+ba/b`);
+        // Video mode: handle No Audio option
+        if (noAudio) {
+          if (resolution !== 'best') {
+            const h = parseInt(resolution, 10);
+            if (h > 0) {
+              args.push('-f', `bv*[height<=${h}][ext=${format}]/bv*[height<=${h}]/bv*`);
+            } else {
+              args.push('-f', `bv*[ext=${format}]/bv*`);
+            }
+          } else {
+            args.push('-f', `bv*[ext=${format}]/bv*`);
+          }
+          // Stripping audio with ffmpeg postprocessor
+          args.push('--postprocessor-args', 'ffmpeg:-an');
+        } else {
+          if (resolution !== 'best') {
+            const h = parseInt(resolution, 10);
+            if (h > 0) {
+              args.push('-f', `bv*[height<=${h}]+ba/b[height<=${h}] / bv*+ba/b`);
+            }
           }
         }
+
         if (fastReencode) {
           args.push('--recode-video', 'mp4');
-          if (this.engineManager.status?.hardwareAccels?.nvenc) {
-            args.push('--postprocessor-args', 'VideoConvertor:-c:v h264_nvenc');
-          } else if (this.engineManager.status?.hardwareAccels?.qsv) {
-            args.push('--postprocessor-args', 'VideoConvertor:-c:v h264_qsv');
-          }
+          const encoder = this.engineManager.status?.hardwareAccels?.nvenc
+            ? 'h264_nvenc'
+            : this.engineManager.status?.hardwareAccels?.qsv
+            ? 'h264_qsv'
+            : 'libx264';
+          const ppArgs = noAudio
+            ? `VideoConvertor:-c:v ${encoder} -an`
+            : `VideoConvertor:-c:v ${encoder}`;
+          args.push('--postprocessor-args', ppArgs);
         }
         args.push('--merge-output-format', format || 'mp4');
         if (embedThumbnail) args.push('--embed-thumbnail');
@@ -667,7 +830,7 @@ class Downloader {
   /**
    * Direct high-speed download for TikTok video streams (bypasses login wall, zero watermark)
    */
-  async _downloadDirectTikTokVideo(videoUrl, outputDir, jobConfig, title, fastReencode, onProgress, onLog) {
+  async _downloadDirectTikTokVideo(videoUrl, outputDir, jobConfig, title, fastReencode, noAudio, onProgress, onLog) {
     const { jobId } = jobConfig;
     const safeTitle = (title || 'TikTok_Video').replace(/[\\/:*?"<>|]/g, '_').slice(0, 90).trim();
     const finalPath = path.join(outputDir, `${safeTitle}.mp4`);
@@ -675,22 +838,55 @@ class Downloader {
 
     await this._downloadHttpMedia(videoUrl, tempPath, jobId, onProgress, onLog);
 
-    // Fast re-encode if requested by power user
-    if (fastReencode && this.engineManager.ffmpegPath) {
+    // If noAudio and not re-encoding, strip audio track with instant stream copy
+    if (noAudio && !fastReencode && this.engineManager.ffmpegPath) {
+      if (onLog) onLog('[TikTok Engine] Stripping audio track (No Audio selected)...');
+      if (onProgress) onProgress({ jobId, status: 'converting', percent: 99, speed: null, eta: null });
+
+      const mutePath = path.join(outputDir, `${safeTitle}_muted_${Date.now()}.mp4`);
+      await new Promise((res) => {
+        const proc = spawn(this.engineManager.ffmpegPath, [
+          '-y', '-i', tempPath,
+          '-c:v', 'copy',
+          '-an',
+          mutePath,
+        ], { windowsHide: true });
+        proc.on('close', (code) => {
+          try { fs.unlinkSync(tempPath); } catch (e) {}
+          if (code === 0 && fs.existsSync(mutePath)) {
+            if (fs.existsSync(finalPath)) try { fs.unlinkSync(finalPath); } catch (e) {}
+            fs.renameSync(mutePath, finalPath);
+          } else {
+            if (fs.existsSync(tempPath)) fs.renameSync(tempPath, finalPath);
+          }
+          res();
+        });
+        proc.on('error', () => {
+          if (fs.existsSync(tempPath)) fs.renameSync(tempPath, finalPath);
+          res();
+        });
+      });
+    } else if (fastReencode && this.engineManager.ffmpegPath) {
       if (onLog) onLog('[TikTok Engine] Fast re-encoding video with FFmpeg...');
       if (onProgress) onProgress({ jobId, status: 'converting', percent: 99, speed: null, eta: null });
 
       const encoder = this.engineManager.status?.hardwareAccels?.nvenc ? 'h264_nvenc' : this.engineManager.status?.hardwareAccels?.qsv ? 'h264_qsv' : 'libx264';
       const reencodePath = path.join(outputDir, `${safeTitle}_reencoded.mp4`);
 
+      const ffmpegArgs = [
+        '-y', '-i', tempPath,
+        '-c:v', encoder,
+        '-preset', 'fast',
+      ];
+      if (noAudio) {
+        ffmpegArgs.push('-an');
+      } else {
+        ffmpegArgs.push('-c:a', 'aac', '-b:a', '192k');
+      }
+      ffmpegArgs.push(reencodePath);
+
       await new Promise((res, rej) => {
-        const proc = spawn(this.engineManager.ffmpegPath, [
-          '-y', '-i', tempPath,
-          '-c:v', encoder,
-          '-preset', 'fast',
-          '-c:a', 'aac', '-b:a', '192k',
-          reencodePath,
-        ], { windowsHide: true });
+        const proc = spawn(this.engineManager.ffmpegPath, ffmpegArgs, { windowsHide: true });
 
         proc.on('close', (code) => {
           try { fs.unlinkSync(tempPath); } catch (e) {}
