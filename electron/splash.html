@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>itzDownloader Desktop Loading</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-app-region: drag;
+    }
+    body {
+      width: 100vw;
+      height: 100vh;
+      background: #07090e;
+      color: #e6edf3;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid rgba(230, 180, 34, 0.25);
+      border-radius: 12px;
+      overflow: hidden;
+      position: relative;
+    }
+    .glow-bg {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 280px;
+      height: 160px;
+      background: radial-gradient(circle, rgba(230, 180, 34, 0.12) 0%, rgba(7, 9, 14, 0) 70%);
+      pointer-events: none;
+    }
+    .logo-container {
+      width: 64px;
+      height: 64px;
+      background: linear-gradient(135deg, rgba(230, 180, 34, 0.2), rgba(230, 180, 34, 0.05));
+      border: 1px solid rgba(230, 180, 34, 0.35);
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 18px;
+      box-shadow: 0 0 25px rgba(230, 180, 34, 0.25);
+      animation: pulseLogo 2s infinite ease-in-out;
+    }
+    .logo-svg {
+      width: 32px;
+      height: 32px;
+      fill: #e6b422;
+    }
+    .title {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: #ffffff;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .badge {
+      font-size: 10.5px;
+      font-weight: 600;
+      padding: 2px 7px;
+      border-radius: 9999px;
+      background: rgba(230, 180, 34, 0.15);
+      color: #e6b422;
+      border: 1px solid rgba(230, 180, 34, 0.3);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .subtitle {
+      font-size: 12px;
+      color: #8b949e;
+      margin-bottom: 22px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .status-text {
+      color: #cbd5e1;
+      font-weight: 500;
+    }
+    .progress-track {
+      width: 260px;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 9999px;
+      overflow: hidden;
+      position: relative;
+    }
+    .progress-bar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      height: 100%;
+      width: 45%;
+      background: linear-gradient(90deg, #e6b422, #f59e0b, #fbbf24);
+      border-radius: 9999px;
+      animation: shimmerSlide 1.4s infinite ease-in-out;
+      box-shadow: 0 0 10px rgba(230, 180, 34, 0.5);
+    }
+    @keyframes pulseLogo {
+      0%, 100% { transform: scale(1); box-shadow: 0 0 20px rgba(230, 180, 34, 0.2); }
+      50% { transform: scale(1.04); box-shadow: 0 0 32px rgba(230, 180, 34, 0.4); }
+    }
+    @keyframes shimmerSlide {
+      0% { left: -45%; width: 30%; }
+      50% { left: 35%; width: 50%; }
+      100% { left: 100%; width: 30%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="glow-bg"></div>
+
+  <div class="logo-container">
+    <svg class="logo-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+      <polyline points="7 10 12 15 17 10"/>
+      <line x1="12" y1="15" x2="12" y2="3"/>
+    </svg>
+  </div>
+
+  <div class="title">
+    <span>itzDownloader</span>
+    <span class="badge">Desktop</span>
+  </div>
+
+  <div class="subtitle">
+    <span>Starting engine...</span>
+    <span class="status-text" id="status-label">Initializing</span>
+  </div>
+
+  <div class="progress-track">
+    <div class="progress-bar"></div>
+  </div>
+</body>
+</html>

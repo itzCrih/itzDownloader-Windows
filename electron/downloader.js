@@ -730,6 +730,7 @@ class Downloader {
       let finalFilePath = null;
 
       this.activeJobs.set(jobId, { proc, config: jobConfig, outputDir });
+      let convertingInterval = null;
 
       proc.stdout.on('data', (data) => {
         const text = data.toString();
@@ -765,17 +766,43 @@ class Downloader {
             }
           }
 
-          if (line.includes('[Merger]') || line.includes('[ExtractAudio]')) {
-            if (onProgress) {
-              onProgress({
-                jobId,
-                status: 'converting',
-                percent: 99,
-                speed: null,
-                eta: null,
-                rawLine: line,
-              });
+          if (line.includes('[Merger]') || line.includes('[ExtractAudio]') || line.includes('[VideoConvertor]') || line.includes('[FixupM3u8]')) {
+            const isAudio = line.includes('[ExtractAudio]');
+            const isConvert = line.includes('[VideoConvertor]');
+            const stageText = isAudio
+              ? 'Extracting & encoding audio with FFmpeg...'
+              : isConvert
+              ? 'Converting video container & streams...'
+              : 'Multiplexing audio & video streams...';
+
+            if (!convertingInterval) {
+              let convertPercent = 90;
+              if (onProgress) {
+                onProgress({
+                  jobId,
+                  status: 'converting',
+                  percent: convertPercent,
+                  speed: 'FFmpeg Active',
+                  stage: stageText,
+                  rawLine: line,
+                });
+              }
+              convertingInterval = setInterval(() => {
+                if (convertPercent < 98.5) {
+                  convertPercent += 0.8;
+                  if (onProgress) {
+                    onProgress({
+                      jobId,
+                      status: 'converting',
+                      percent: parseFloat(convertPercent.toFixed(1)),
+                      speed: 'FFmpeg Encoding',
+                      stage: stageText,
+                    });
+                  }
+                }
+              }, 400);
             }
+
             const mergeMatch = line.match(/into\s+"?(.+?)"?$/i);
             if (mergeMatch && mergeMatch[1]) {
               finalFilePath = mergeMatch[1].trim();
@@ -792,6 +819,7 @@ class Downloader {
       });
 
       proc.on('close', (code) => {
+        if (convertingInterval) clearInterval(convertingInterval);
         this.activeJobs.delete(jobId);
 
         if (code === 0) {
@@ -821,6 +849,7 @@ class Downloader {
       });
 
       proc.on('error', (err) => {
+        if (convertingInterval) clearInterval(convertingInterval);
         this.activeJobs.delete(jobId);
         reject(err);
       });
@@ -841,7 +870,7 @@ class Downloader {
     // If noAudio and not re-encoding, strip audio track with instant stream copy
     if (noAudio && !fastReencode && this.engineManager.ffmpegPath) {
       if (onLog) onLog('[TikTok Engine] Stripping audio track (No Audio selected)...');
-      if (onProgress) onProgress({ jobId, status: 'converting', percent: 99, speed: null, eta: null });
+      if (onProgress) onProgress({ jobId, status: 'converting', percent: 92, speed: 'Stream Copy', stage: 'Removing audio track...' });
 
       const mutePath = path.join(outputDir, `${safeTitle}_muted_${Date.now()}.mp4`);
       await new Promise((res) => {
@@ -868,15 +897,17 @@ class Downloader {
       });
     } else if (fastReencode && this.engineManager.ffmpegPath) {
       if (onLog) onLog('[TikTok Engine] Fast re-encoding video with FFmpeg...');
-      if (onProgress) onProgress({ jobId, status: 'converting', percent: 99, speed: null, eta: null });
-
+      let reencodePercent = 15;
       const encoder = this.engineManager.status?.hardwareAccels?.nvenc ? 'h264_nvenc' : this.engineManager.status?.hardwareAccels?.qsv ? 'h264_qsv' : 'libx264';
+      if (onProgress) onProgress({ jobId, status: 'converting', percent: reencodePercent, speed: encoder, stage: `Re-encoding video with ${encoder}...` });
+
       const reencodePath = path.join(outputDir, `${safeTitle}_reencoded.mp4`);
 
       const ffmpegArgs = [
         '-y', '-i', tempPath,
         '-c:v', encoder,
         '-preset', 'fast',
+        '-progress', 'pipe:1',
       ];
       if (noAudio) {
         ffmpegArgs.push('-an');
@@ -885,10 +916,43 @@ class Downloader {
       }
       ffmpegArgs.push(reencodePath);
 
-      await new Promise((res, rej) => {
+      await new Promise((res) => {
         const proc = spawn(this.engineManager.ffmpegPath, ffmpegArgs, { windowsHide: true });
 
+        const tickTimer = setInterval(() => {
+          if (reencodePercent < 97) {
+            reencodePercent += 3.5;
+            if (onProgress) {
+              onProgress({
+                jobId,
+                status: 'converting',
+                percent: parseFloat(reencodePercent.toFixed(0)),
+                speed: encoder,
+                stage: `Re-encoding video stream • ${reencodePercent.toFixed(0)}%`,
+              });
+            }
+          }
+        }, 280);
+
+        proc.stdout.on('data', (d) => {
+          const str = d.toString();
+          const speedMatch = str.match(/speed=\s*([\d\.]+x)/);
+          const fpsMatch = str.match(/fps=\s*([\d\.]+)/);
+          if (speedMatch || fpsMatch) {
+            if (onProgress) {
+              onProgress({
+                jobId,
+                status: 'converting',
+                percent: Math.min(98, Math.max(reencodePercent, 35)),
+                speed: speedMatch ? speedMatch[1] : `${encoder} active`,
+                stage: `Encoding: ${speedMatch ? speedMatch[1] : ''} ${fpsMatch ? `• ${fpsMatch[1]} FPS` : ''}`.trim(),
+              });
+            }
+          }
+        });
+
         proc.on('close', (code) => {
+          clearInterval(tickTimer);
           try { fs.unlinkSync(tempPath); } catch (e) {}
           if (code === 0 && fs.existsSync(reencodePath)) {
             if (fs.existsSync(finalPath)) try { fs.unlinkSync(finalPath); } catch (e) {}
@@ -901,6 +965,7 @@ class Downloader {
           }
         });
         proc.on('error', () => {
+          clearInterval(tickTimer);
           if (fs.existsSync(tempPath)) fs.renameSync(tempPath, finalPath);
           res();
         });
@@ -929,7 +994,23 @@ class Downloader {
 
     if (this.engineManager.ffmpegPath) {
       if (onLog) onLog(`[TikTok Engine] Converting audio to ${ext.toUpperCase()} with FFmpeg...`);
-      if (onProgress) onProgress({ jobId, status: 'converting', percent: 99, speed: null, eta: null });
+      let audioPercent = 20;
+      if (onProgress) onProgress({ jobId, status: 'converting', percent: audioPercent, speed: 'FFmpeg Audio Encoder', stage: `Converting audio track to ${ext.toUpperCase()}...` });
+
+      const audioTimer = setInterval(() => {
+        if (audioPercent < 97) {
+          audioPercent += 6;
+          if (onProgress) {
+            onProgress({
+              jobId,
+              status: 'converting',
+              percent: audioPercent,
+              speed: 'FFmpeg Audio Encoder',
+              stage: `Encoding audio to ${ext.toUpperCase()} • ${audioPercent}%`,
+            });
+          }
+        }
+      }, 200);
 
       const ffmpegArgs = ['-y', '-i', tempPath, '-vn'];
       if (isFlac) {
@@ -942,11 +1023,13 @@ class Downloader {
       await new Promise((res, rej) => {
         const proc = spawn(this.engineManager.ffmpegPath, ffmpegArgs, { windowsHide: true });
         proc.on('close', (code) => {
+          clearInterval(audioTimer);
           try { fs.unlinkSync(tempPath); } catch (e) {}
           if (code === 0 && fs.existsSync(finalPath)) res();
           else rej(new Error('Audio conversion failed.'));
         });
         proc.on('error', (err) => {
+          clearInterval(audioTimer);
           try { fs.unlinkSync(tempPath); } catch (e) {}
           rej(err);
         });

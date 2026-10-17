@@ -146,7 +146,12 @@ export default function QueueTab({
                     </span>
                     <span className={`queue-status-badge ${job.status}`}>
                       {isDownloading && 'Downloading'}
-                      {isConverting && 'Processing & Merging'}
+                      {isConverting && (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                          <Loader2 size={11} className="spin-animation" />
+                          <span>Re-encoding</span>
+                        </span>
+                      )}
                       {isCompleted && 'Completed'}
                       {isError && 'Failed'}
                     </span>
@@ -165,23 +170,36 @@ export default function QueueTab({
                     <div className="queue-progress-section">
                       <div className="progress-bar-track">
                         <div
-                          className="progress-bar-fill shimmer"
-                          style={{ width: `${Math.max(4, Math.min(100, progressPercent))}%` }}
+                          className={`progress-bar-fill ${isConverting ? 'converting' : 'shimmer'}`}
+                          style={{ width: `${Math.max(6, Math.min(100, progressPercent))}%` }}
                         />
                       </div>
 
-                      <div className="progress-stats-row">
-                        <span className="progress-stat-percent">{progressPercent.toFixed(1)}%</span>
-                        {job.progress?.speed && (
-                          <span className="progress-stat-speed">{job.progress.speed}</span>
-                        )}
-                        {job.progress?.totalSize && (
-                          <span className="progress-stat-size">{job.progress.totalSize}</span>
-                        )}
-                        {job.progress?.eta && (
-                          <span className="progress-stat-eta">ETA: {job.progress.eta}</span>
-                        )}
-                      </div>
+                      {isConverting ? (
+                        <div className="progress-stats-row converting-active">
+                          <span className="progress-stat-percent">{progressPercent.toFixed(0)}%</span>
+                          <span className="progress-stat-stage">
+                            <span className="pulse-indicator-dot"></span>
+                            {job.progress?.stage || 'FFmpeg re-encoding & finalizing container...'}
+                          </span>
+                          {job.progress?.speed && (
+                            <span className="progress-stat-speed">{job.progress.speed}</span>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="progress-stats-row">
+                          <span className="progress-stat-percent">{progressPercent.toFixed(1)}%</span>
+                          {job.progress?.speed && (
+                            <span className="progress-stat-speed">{job.progress.speed}</span>
+                          )}
+                          {job.progress?.totalSize && (
+                            <span className="progress-stat-size">{job.progress.totalSize}</span>
+                          )}
+                          {job.progress?.eta && (
+                            <span className="progress-stat-eta">ETA: {job.progress.eta}</span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
 

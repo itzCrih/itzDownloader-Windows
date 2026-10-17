@@ -1,6 +1,6 @@
 {
   "name": "itzdownloader-desktop",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "itzDownloader Desktop — Ultra-Fast, 100% Local Video & Audio Suite for Windows",
   "productName": "itzDownloader Desktop",
   "main": "electron/main.js",
@@ -9,8 +9,9 @@
     "build": "vite build",
     "electron": "electron .",
     "start": "concurrently -k \"vite\" \"wait-on tcp:5173 && electron .\"",
-    "dist": "vite build && electron-builder --win --x64",
-    "dist:portable": "vite build && electron-builder --win portable --x64",
+    "sign": "node scripts/sign-binaries.js",
+    "dist": "vite build && electron-builder --win --x64 && node scripts/sign-binaries.js",
+    "dist:portable": "vite build && electron-builder --win portable --x64 && node scripts/sign-binaries.js",
     "release": "node scripts/publish-release.js"
   },
   "build": {
@@ -31,7 +32,10 @@
         "nsis",
         "portable"
       ],
-      "icon": "public/icon.ico"
+      "icon": "public/icon.ico",
+      "certificateFile": "certs/itzcrih-codesign.pfx",
+      "certificatePassword": "itzCrih2026Secure!",
+      "timeStampServer": "http://timestamp.digicert.com"
     },
     "nsis": {
       "oneClick": false,

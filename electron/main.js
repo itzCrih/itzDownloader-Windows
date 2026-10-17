@@ -11,10 +11,44 @@ app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling');
 app.commandLine.appendSwitch('enable-features', 'PlatformHEVCDecoderSupport');
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=512');
 
+let splashWindow = null;
 let mainWindow = null;
 let engineManager = null;
 let downloader = null;
 let autoUpdater = null;
+
+function createSplashWindow() {
+  const iconPath = path.join(__dirname, '../public/icon.ico');
+  const pngIconPath = path.join(__dirname, '../public/logo.png');
+
+  splashWindow = new BrowserWindow({
+    width: 440,
+    height: 280,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    resizable: false,
+    center: true,
+    show: false,
+    icon: fs.existsSync(iconPath) ? iconPath : fs.existsSync(pngIconPath) ? pngIconPath : undefined,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  });
+
+  const splashPath = path.join(__dirname, 'splash.html');
+  if (fs.existsSync(splashPath)) {
+    splashWindow.loadFile(splashPath);
+  }
+
+  splashWindow.once('ready-to-show', () => {
+    if (splashWindow && !splashWindow.isDestroyed()) {
+      splashWindow.show();
+    }
+  });
+}
 
 function createWindow() {
   const iconPath = path.join(__dirname, '../public/icon.ico');
@@ -56,7 +90,16 @@ function createWindow() {
   });
 
   mainWindow.once('ready-to-show', () => {
-    mainWindow.show();
+    setTimeout(() => {
+      if (splashWindow && !splashWindow.isDestroyed()) {
+        splashWindow.close();
+        splashWindow = null;
+      }
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    }, 600);
 
     autoUpdater = new AutoUpdater(mainWindow);
     // Background auto-update check on startup after 4 seconds
@@ -95,11 +138,14 @@ if (!gotTheLock) {
   });
 
   app.whenReady().then(async () => {
+    // Show instant splash screen immediately
+    createSplashWindow();
+
     const appDataPath = app.getPath('userData');
     engineManager = new EngineManager(appDataPath);
     downloader = new Downloader(engineManager);
 
-    // Initial detection of yt-dlp & ffmpeg
+    // Initial detection of yt-dlp & ffmpeg (checks local, system, and itzCut sibling)
     await engineManager.detect();
 
     setupIpcHandlers();
@@ -206,6 +252,14 @@ function setupIpcHandlers() {
   ipcMain.handle('engine:downloadFfmpeg', async () => {
     return await engineManager.downloadFfmpeg((progress) => {
       if (mainWindow) mainWindow.webContents.send('engine:download-progress', { engine: 'ffmpeg', ...progress });
+    });
+  });
+
+  ipcMain.handle('engine:ensureAll', async () => {
+    return await engineManager.ensureAllEngines((progress) => {
+      if (mainWindow) {
+        mainWindow.webContents.send('engine:install-progress', progress);
+      }
     });
   });
 

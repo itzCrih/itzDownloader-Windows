@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { DownloadCloud, ShieldCheck, Lock } from 'lucide-react';
 import TitleBar from './components/TitleBar';
 import Navbar from './components/Navbar';
 import ToastContainer from './components/ToastContainer';
@@ -15,6 +16,7 @@ export default function App() {
   const [engineStatus, setEngineStatus] = useState(null);
   const [isDownloadingEngine, setIsDownloadingEngine] = useState(false);
   const [engineDownloadProgress, setEngineDownloadProgress] = useState(null);
+  const [engineInstallingState, setEngineInstallingState] = useState(null);
   const [jobs, setJobs] = useState([]);
   const [toasts, setToasts] = useState([]);
 
@@ -53,8 +55,8 @@ export default function App() {
 
   const [updateState, setUpdateState] = useState({
     status: 'idle',
-    currentVersion: '1.1.0',
-    latestVersion: '1.1.0',
+    currentVersion: '1.2.0',
+    latestVersion: '1.2.0',
     downloadPercent: 0,
     error: null,
   });
@@ -82,17 +84,17 @@ export default function App() {
     }, 300);
   };
 
-  // Initial startup probe
+  // Mandatory initial startup probe & auto-engine preparation
   useEffect(() => {
     if (!window.itzDownloaderAPI) return;
 
     window.itzDownloaderAPI.getDefaultOutputDir().then(setDefaultOutputDir);
 
-    window.itzDownloaderAPI.getEngineStatus().then((status) => {
+    // Initial check and auto-download if missing
+    window.itzDownloaderAPI.ensureAllEngines().then((status) => {
       setEngineStatus(status);
-      if (!status.ytDlpAvailable) {
-        showToast('yt-dlp is not installed. Click Settings to download it automatically.', 'warning');
-      }
+    }).catch(() => {
+      window.itzDownloaderAPI.getEngineStatus().then(setEngineStatus);
     });
 
     // Subscriptions
@@ -143,6 +145,18 @@ export default function App() {
       setEngineDownloadProgress(data);
     });
 
+    const unsubEngineInstall = window.itzDownloaderAPI.onEngineInstallProgress((data) => {
+      if (data.isInstalling) {
+        setEngineInstallingState(data);
+      } else {
+        setEngineInstallingState(null);
+        if (data.status) {
+          setEngineStatus(data.status);
+          showToast('Engines ready: yt-dlp & FFmpeg verified!', 'success');
+        }
+      }
+    });
+
     const unsubUpdateStatus = window.itzDownloaderAPI.onUpdateStatus((data) => {
       setUpdateState((prev) => ({
         ...prev,
@@ -163,6 +177,7 @@ export default function App() {
       if (unsubError) unsubError();
       if (unsubLog) unsubLog();
       if (unsubEngineDownload) unsubEngineDownload();
+      if (unsubEngineInstall) unsubEngineInstall();
       if (unsubUpdateStatus) unsubUpdateStatus();
       if (unsubUpdateDownloaded) unsubUpdateDownloaded();
     };
@@ -223,15 +238,27 @@ export default function App() {
 
   const handleRefreshEngines = async () => {
     if (window.itzDownloaderAPI) {
-      const s = await window.itzDownloaderAPI.getEngineStatus();
-      setEngineStatus(s);
-      showToast('Engine status refreshed.', 'info');
+      try {
+        const s = await window.itzDownloaderAPI.ensureAllEngines();
+        setEngineStatus(s);
+        showToast('Engine status refreshed.', 'info');
+      } catch (e) {
+        const fallback = await window.itzDownloaderAPI.getEngineStatus();
+        setEngineStatus(fallback);
+      }
     }
   };
 
   const handleDownloadYtDlp = async () => {
     if (!window.itzDownloaderAPI) return;
     setIsDownloadingEngine(true);
+    setEngineInstallingState({
+      isInstalling: true,
+      engine: 'yt-dlp',
+      title: 'Downloading yt-dlp Engine...',
+      percent: 10,
+      detail: 'Fetching latest yt-dlp release from GitHub...',
+    });
     try {
       const updated = await window.itzDownloaderAPI.downloadYtDlp();
       setEngineStatus(updated);
@@ -240,6 +267,7 @@ export default function App() {
       showToast(`Failed to download yt-dlp: ${err.message}`, 'error');
     } finally {
       setIsDownloadingEngine(false);
+      setEngineInstallingState(null);
       setEngineDownloadProgress(null);
     }
   };
@@ -252,6 +280,13 @@ export default function App() {
   const handleDownloadFfmpeg = async () => {
     if (!window.itzDownloaderAPI) return;
     setIsDownloadingEngine(true);
+    setEngineInstallingState({
+      isInstalling: true,
+      engine: 'ffmpeg',
+      title: 'Configuring FFmpeg & Encoders...',
+      percent: 15,
+      detail: 'Checking itzCut installation or downloading static build...',
+    });
     try {
       const updated = await window.itzDownloaderAPI.downloadFfmpeg();
       setEngineStatus(updated);
@@ -260,6 +295,7 @@ export default function App() {
       showToast(`Failed to download FFmpeg: ${err.message}`, 'error');
     } finally {
       setIsDownloadingEngine(false);
+      setEngineInstallingState(null);
       setEngineDownloadProgress(null);
     }
   };
@@ -393,10 +429,52 @@ export default function App() {
           </div>
 
           <div>
-            <span style={{ fontFamily: 'var(--font-mono)' }}>itzDownloader Desktop v1.1.0</span>
+            <span style={{ fontFamily: 'var(--font-mono)' }}>itzDownloader Desktop v1.2.0</span>
           </div>
         </footer>
       </div>
+
+      {/* Full-Screen Blocking Modal Overlay during Engine Setup to Prevent Crashes */}
+      {engineInstallingState?.isInstalling && (
+        <div className="engine-blocking-overlay" role="dialog" aria-modal="true">
+          <div className="engine-blocking-modal">
+            <div className="engine-blocking-glow"></div>
+            <div className="engine-blocking-logo">
+              <DownloadCloud size={40} className="engine-blocking-icon spin-pulse" />
+            </div>
+
+            <div className="engine-blocking-badge">
+              <ShieldCheck size={13} />
+              <span>Core Engine Setup</span>
+            </div>
+
+            <h2 className="engine-blocking-title">
+              {engineInstallingState.title || 'Configuring Media Engines'}
+            </h2>
+            <p className="engine-blocking-desc">
+              {engineInstallingState.detail || 'Preparing yt-dlp & FFmpeg binaries. Clicks are safely locked to prevent app crashes.'}
+            </p>
+
+            <div className="engine-blocking-progress-wrap">
+              <div className="engine-blocking-track">
+                <div
+                  className="engine-blocking-fill"
+                  style={{ width: `${Math.max(8, Math.min(100, engineInstallingState.percent || 15))}%` }}
+                />
+              </div>
+              <div className="engine-blocking-stats">
+                <span>{engineInstallingState.percent || 15}%</span>
+                <span>{engineInstallingState.engine ? `Engine: ${engineInstallingState.engine.toUpperCase()}` : 'Verifying local dependencies'}</span>
+              </div>
+            </div>
+
+            <div className="engine-blocking-lock-banner">
+              <Lock size={12} />
+              <span>User interactions temporarily locked until installation finishes</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>

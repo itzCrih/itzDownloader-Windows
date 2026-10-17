@@ -47,6 +47,61 @@ class EngineManager {
   /**
    * Detect installed binaries (yt-dlp, ffmpeg, ffprobe) in local bin or system PATH / WinGet
    */
+  _findSiblingFfmpeg() {
+    if (process.platform !== 'win32') return null;
+
+    const candidateDirs = [
+      path.join(process.env.APPDATA || '', 'itzCut Desktop', 'bin'),
+      path.join(process.env.APPDATA || '', 'itzcut-desktop', 'bin'),
+      path.join(process.env.APPDATA || '', 'itzCut', 'bin'),
+      path.join(process.env.APPDATA || '', 'itzcut-windows', 'bin'),
+      path.join(process.env.LOCALAPPDATA || '', 'Programs', 'itzCut Desktop', 'resources', 'bin'),
+      path.join(process.env.LOCALAPPDATA || '', 'Programs', 'itzcut-desktop', 'resources', 'bin'),
+      path.join(process.env.LOCALAPPDATA || '', 'Programs', 'itzCut', 'resources', 'bin'),
+      path.join(process.env.LOCALAPPDATA || '', 'itzCut', 'bin'),
+      path.join(process.env.LOCALAPPDATA || '', 'itzCut Desktop', 'bin'),
+      path.resolve(__dirname, '../../itzCut-Windows/bin'),
+      path.resolve(__dirname, '../../itzCut/bin'),
+      path.resolve(__dirname, '../../itzCut-Windows/release/win-unpacked/resources/bin'),
+    ];
+
+    for (const dir of candidateDirs) {
+      const ffmpegPath = path.join(dir, 'ffmpeg.exe');
+      const ffprobePath = path.join(dir, 'ffprobe.exe');
+      if (fs.existsSync(ffmpegPath)) {
+        return {
+          dir,
+          ffmpegPath,
+          ffprobePath: fs.existsSync(ffprobePath) ? ffprobePath : ffmpegPath,
+        };
+      }
+    }
+    return null;
+  }
+
+  _findSiblingYtDlp() {
+    if (process.platform !== 'win32') return null;
+
+    const candidateDirs = [
+      path.join(process.env.APPDATA || '', 'itzCut Desktop', 'bin'),
+      path.join(process.env.APPDATA || '', 'itzcut-desktop', 'bin'),
+      path.join(process.env.APPDATA || '', 'itzCut', 'bin'),
+      path.join(process.env.LOCALAPPDATA || '', 'Programs', 'itzCut Desktop', 'resources', 'bin'),
+      path.resolve(__dirname, '../../itzCut-Windows/bin'),
+    ];
+
+    for (const dir of candidateDirs) {
+      const ytDlpPath = path.join(dir, 'yt-dlp.exe');
+      if (fs.existsSync(ytDlpPath)) {
+        return ytDlpPath;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Detect installed binaries (yt-dlp, ffmpeg, ffprobe) in local bin, system PATH / WinGet, or sibling itzCut
+   */
   async detect() {
     this.ensureBinDir();
 
@@ -61,8 +116,20 @@ class EngineManager {
         this.ytDlpPath = systemYtDlp;
         this.status.ytDlpSource = 'system';
       } else {
-        this.ytDlpPath = null;
-        this.status.ytDlpSource = null;
+        const siblingYtDlp = this._findSiblingYtDlp();
+        if (siblingYtDlp) {
+          try {
+            fs.copyFileSync(siblingYtDlp, localYtDlp);
+            this.ytDlpPath = localYtDlp;
+            this.status.ytDlpSource = 'itzCut (reused)';
+          } catch (e) {
+            this.ytDlpPath = siblingYtDlp;
+            this.status.ytDlpSource = 'itzCut (linked)';
+          }
+        } else {
+          this.ytDlpPath = null;
+          this.status.ytDlpSource = null;
+        }
       }
     }
 
@@ -99,9 +166,26 @@ class EngineManager {
         this.ffprobePath = systemFfprobe || systemFfmpeg;
         this.status.ffmpegSource = 'system';
       } else {
-        this.ffmpegPath = null;
-        this.ffprobePath = null;
-        this.status.ffmpegSource = null;
+        const sibling = this._findSiblingFfmpeg();
+        if (sibling) {
+          try {
+            fs.copyFileSync(sibling.ffmpegPath, localFfmpeg);
+            if (sibling.ffprobePath && fs.existsSync(sibling.ffprobePath)) {
+              fs.copyFileSync(sibling.ffprobePath, localFfprobe);
+            }
+            this.ffmpegPath = localFfmpeg;
+            this.ffprobePath = localFfprobe;
+            this.status.ffmpegSource = 'itzCut (reused)';
+          } catch (e) {
+            this.ffmpegPath = sibling.ffmpegPath;
+            this.ffprobePath = sibling.ffprobePath;
+            this.status.ffmpegSource = 'itzCut (linked)';
+          }
+        } else {
+          this.ffmpegPath = null;
+          this.ffprobePath = null;
+          this.status.ffmpegSource = null;
+        }
       }
     }
 
@@ -318,11 +402,32 @@ class EngineManager {
   }
 
   /**
-   * Download static FFmpeg & FFprobe build
+   * Download static FFmpeg & FFprobe build (or reuse from itzCut Desktop if already present)
    */
   async downloadFfmpeg(progressCallback) {
     this.ensureBinDir();
-    // Use stable GitHub release archive for static Windows ffmpeg
+
+    // 1. Check if user already has itzCut Desktop installed on this system!
+    const sibling = this._findSiblingFfmpeg();
+    if (sibling) {
+      if (progressCallback) {
+        progressCallback({ status: 'copying', percent: 60, message: 'Detected existing FFmpeg from itzCut Desktop! Reusing...' });
+      }
+      try {
+        const localFfmpeg = path.join(this.binDir, 'ffmpeg.exe');
+        const localFfprobe = path.join(this.binDir, 'ffprobe.exe');
+        fs.copyFileSync(sibling.ffmpegPath, localFfmpeg);
+        if (sibling.ffprobePath && fs.existsSync(sibling.ffprobePath)) {
+          fs.copyFileSync(sibling.ffprobePath, localFfprobe);
+        }
+        if (progressCallback) {
+          progressCallback({ status: 'completed', percent: 100, message: 'Reused FFmpeg from itzCut Desktop successfully!' });
+        }
+        return await this.detect();
+      } catch (err) {}
+    }
+
+    // 2. Download from official static archive if not found in sibling
     const downloadUrl = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip';
     const tempZipPath = path.join(this.binDir, 'ffmpeg_download.zip');
 
@@ -366,6 +471,74 @@ class EngineManager {
     }
 
     return await this.detect();
+  }
+
+  /**
+   * Automatically verifies and installs all required engines (yt-dlp + ffmpeg)
+   */
+  async ensureAllEngines(onProgress) {
+    await this.detect();
+
+    // 1. Ensure yt-dlp
+    if (!this.status.ytDlpAvailable) {
+      if (onProgress) {
+        onProgress({
+          isInstalling: true,
+          engine: 'yt-dlp',
+          title: 'Configuring Media Engine (yt-dlp)...',
+          percent: 10,
+          detail: 'Downloading official yt-dlp binary from GitHub...',
+        });
+      }
+      await this.downloadYtDlp((p) => {
+        if (onProgress) {
+          onProgress({
+            isInstalling: true,
+            engine: 'yt-dlp',
+            title: 'Configuring yt-dlp...',
+            percent: Math.min(50, Math.round((p.percent || 0) * 0.5)),
+            detail: p.message || 'Downloading yt-dlp...',
+          });
+        }
+      });
+    }
+
+    // 2. Ensure FFmpeg
+    if (!this.status.ffmpegAvailable) {
+      if (onProgress) {
+        onProgress({
+          isInstalling: true,
+          engine: 'ffmpeg',
+          title: 'Configuring FFmpeg & Encoders...',
+          percent: 55,
+          detail: 'Checking itzCut installation or downloading static build...',
+        });
+      }
+      await this.downloadFfmpeg((p) => {
+        if (onProgress) {
+          onProgress({
+            isInstalling: true,
+            engine: 'ffmpeg',
+            title: 'Configuring FFmpeg...',
+            percent: 50 + Math.min(48, Math.round((p.percent || 0) * 0.48)),
+            detail: p.message || 'Setting up FFmpeg...',
+          });
+        }
+      });
+    }
+
+    const finalStatus = await this.detect();
+    if (onProgress) {
+      onProgress({
+        isInstalling: false,
+        engine: 'all',
+        title: 'Engines Ready',
+        percent: 100,
+        detail: 'yt-dlp and FFmpeg successfully verified!',
+        status: finalStatus,
+      });
+    }
+    return finalStatus;
   }
 
   _downloadWithRedirects(url, destinationPath, progressCallback, redirectCount = 0) {
