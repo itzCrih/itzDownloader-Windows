@@ -190,7 +190,7 @@ export default function StudioTab({
             onClick={handleInspect}
             disabled={isInspecting || !url.trim() || !platform.isAllowed}
           >
-            <span>{isInspecting ? 'Inspecting...' : 'Probe Metadata'}</span>
+            <span>{isInspecting ? 'Analyzing...' : 'Analyze'}</span>
           </button>
         </div>
 
