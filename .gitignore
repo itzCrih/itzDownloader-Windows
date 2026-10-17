@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build and Packaging outputs
+dist/
+release/
+build/
+
+# Logs and Diagnostics
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+itzDownloader-debug.log
+
+# Temporary download / test artifacts
+test_app_data/
+downloads/
+temp/
+*.part
+*.ytdl
+
+# Editor and OS
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.DS_Store
+Thumbs.db
