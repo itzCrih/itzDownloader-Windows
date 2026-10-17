@@ -6,10 +6,13 @@ export const WHITELIST_DOMAINS = [
   'm.youtube.com',
   'music.youtube.com',
 
-  // TikTok
+  // TikTok (including mobile shortlinks)
   'tiktok.com',
   'vm.tiktok.com',
+  'vt.tiktok.com',
+  'v.tiktok.com',
   'm.tiktok.com',
+  'mv.tiktok.com',
 
   // Spotify
   'spotify.com',

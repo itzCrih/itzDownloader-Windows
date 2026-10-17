@@ -5,26 +5,41 @@ const https = require('https');
 const http = require('http');
 
 const WHITELIST_DOMAINS = [
+  // YouTube
   'youtube.com', 'youtu.be', 'm.youtube.com', 'music.youtube.com',
-  'tiktok.com', 'vm.tiktok.com', 'm.tiktok.com',
+  // TikTok (including mobile shortlinks)
+  'tiktok.com', 'vm.tiktok.com', 'vt.tiktok.com', 'v.tiktok.com', 'm.tiktok.com', 'mv.tiktok.com',
+  // Spotify
   'spotify.com', 'open.spotify.com',
+  // Instagram & Threads
   'instagram.com', 'instagr.am', 'threads.net',
+  // Twitter (X)
   'twitter.com', 'x.com', 't.co',
+  // SoundCloud
   'soundcloud.com', 'm.soundcloud.com', 'on.soundcloud.com',
+  // Twitch
   'twitch.tv', 'clips.twitch.tv',
+  // Facebook
   'facebook.com', 'fb.watch', 'fb.com', 'm.facebook.com',
+  // Reddit
   'reddit.com', 'v.redd.it', 'redd.it',
+  // Vimeo
   'vimeo.com', 'player.vimeo.com',
+  // Pinterest
   'pinterest.com', 'pin.it',
+  // Dailymotion
   'dailymotion.com', 'dai.ly',
+  // Bilibili
   'bilibili.com', 'b23.tv',
+  // Bandcamp & Audio
   'bandcamp.com', 'podcasts.apple.com',
+  // Streamable & Kick
   'streamable.com', 'kick.com',
 ];
 
 function isDomainAllowed(targetUrl = '') {
   try {
-    const raw = targetUrl.trim();
+    const raw = (targetUrl || '').trim();
     if (!raw) return false;
     const parsed = new URL(raw.startsWith('http') ? raw : `https://${raw}`);
     const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
@@ -38,6 +53,9 @@ function formatYtDlpError(errText = '') {
   const e = (errText || '').toLowerCase();
   if (e.includes('sign in to confirm your age') || e.includes('confirm you’re not a bot') || e.includes('sign in to confirm you’re not a bot')) {
     return 'Age-restricted or verification check detected. Select your browser in Cookies (under Advanced or Settings) to download seamlessly.';
+  }
+  if (e.includes('requiring login for access to this content') || e.includes('tiktok is requiring login')) {
+    return 'TikTok requires authentication or was temporarily blocked. The built-in direct TikWM engine will download this without watermark.';
   }
   if (e.includes('private video') || e.includes('this video is private')) {
     return 'This video is marked Private by its uploader and cannot be accessed.';
@@ -63,7 +81,12 @@ function formatYtDlpError(errText = '') {
 class Downloader {
   constructor(engineManager) {
     this.engineManager = engineManager;
-    this.activeJobs = new Map(); // jobId -> { proc, config, partialFiles }
+    this.activeJobs = new Map(); // jobId -> { proc, config, abortFn, outputDir }
+  }
+
+  _isTikTokUrl(url = '') {
+    const u = (url || '').toLowerCase();
+    return u.includes('tiktok.com');
   }
 
   /**
@@ -79,12 +102,21 @@ class Downloader {
       throw new Error('This domain is not in the verified whitelist. Only safe, trusted platforms (YouTube, TikTok, Spotify, Instagram, Twitter, SoundCloud, Twitch, etc.) are allowed.');
     }
 
-    // Check for Spotify URLs
+    // 1. Check for Spotify URLs
     if (cleanUrl.includes('spotify.com/')) {
       return await this._inspectSpotifyUrl(cleanUrl);
     }
 
-    // Use yt-dlp to inspect media
+    // 2. Check for TikTok URLs - use TikWM API first to bypass login walls & mobile redirect issues
+    if (this._isTikTokUrl(cleanUrl)) {
+      try {
+        return await this._inspectTikTok(cleanUrl);
+      } catch (ttErr) {
+        // Fallback to standard yt-dlp inspection if TikWM has a momentary hiccup
+      }
+    }
+
+    // 3. Use yt-dlp to inspect media for YouTube, Twitter, Twitch, etc.
     if (!this.engineManager.ytDlpPath) {
       await this.engineManager.detect();
     }
@@ -116,7 +148,7 @@ class Downloader {
       proc.on('close', (code) => {
         if (code !== 0) {
           const errDetail = stderr.trim() || 'Could not fetch metadata for this URL.';
-          return reject(new Error(errDetail.split(/\r?\n/)[0] || 'Metadata fetch error'));
+          return reject(new Error(formatYtDlpError(errDetail)));
         }
 
         try {
@@ -165,7 +197,6 @@ class Downloader {
   }
 
   async _inspectSpotifyUrl(spotifyUrl) {
-    // Spotify oEmbed API is public, official, fast, and does not require credentials
     const oembedUrl = `https://open.spotify.com/oembed?url=${encodeURIComponent(spotifyUrl)}`;
 
     return new Promise((resolve, reject) => {
@@ -179,7 +210,6 @@ class Downloader {
         res.on('end', () => {
           try {
             const data = JSON.parse(body);
-            // Title is usually "Track Name" and author_name is "Artist"
             const title = data.title || 'Unknown Title';
             const author = data.author_name || 'Spotify Artist';
 
@@ -205,12 +235,103 @@ class Downloader {
     });
   }
 
+  async _resolveTikTokUrl(rawUrl = '') {
+    const clean = (rawUrl || '').trim();
+    // 1. Direct numeric video ID match (17-21 digits)
+    const directMatch = clean.match(/(\d{17,21})/);
+    if (directMatch) {
+      return `https://www.tiktok.com/@tiktok/video/${directMatch[1]}`;
+    }
+
+    // 2. Follow redirects for mobile shortlinks (vt.tiktok.com, vm.tiktok.com, mv.tiktok.com, etc.)
+    try {
+      const res = await fetch(clean, {
+        method: 'GET',
+        redirect: 'manual',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        },
+      });
+
+      const location = res.headers.get('location');
+      if (location) {
+        const locMatch = location.match(/(\d{17,21})/);
+        if (locMatch) {
+          return `https://www.tiktok.com/@tiktok/video/${locMatch[1]}`;
+        }
+        try {
+          const parsed = new URL(location, clean);
+          const redirectUrl = parsed.searchParams.get('redirect_url');
+          if (redirectUrl) {
+            const redMatch = redirectUrl.match(/(\d{17,21})/);
+            if (redMatch) {
+              return `https://www.tiktok.com/@tiktok/video/${redMatch[1]}`;
+            }
+          }
+        } catch (e) {}
+        return location;
+      }
+    } catch (e) {}
+
+    return clean;
+  }
+
+  async _inspectTikTok(url) {
+    const resolvedUrl = await this._resolveTikTokUrl(url);
+
+    const queryTikWm = (targetUrl) => {
+      return new Promise((resolve, reject) => {
+        const apiUrl = `https://www.tikwm.com/api/?url=${encodeURIComponent(targetUrl)}`;
+        const req = https.get(apiUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' } }, (res) => {
+          let body = '';
+          res.on('data', (d) => { body += d.toString(); });
+          res.on('end', () => {
+            try {
+              const parsed = JSON.parse(body);
+              if (parsed.code === 0 && parsed.data) {
+                const d = parsed.data;
+                return resolve({
+                  url,
+                  title: d.title || 'TikTok Video',
+                  author: d.author?.nickname || (d.author?.unique_id ? `@${d.author.unique_id}` : 'TikTok Creator'),
+                  duration: d.duration || 0,
+                  thumbnail: d.cover || d.origin_cover || null,
+                  platform: 'tiktok',
+                  isLive: false,
+                  isAudioOnly: false,
+                  resolutions: [{ height: 1080, fps: 30, label: 'Clean HD (No Watermark)' }],
+                  tiktokDirectVideo: d.play,
+                  tiktokDirectAudio: d.music,
+                });
+              }
+            } catch (e) {}
+            reject(new Error('TikTok API could not retrieve video'));
+          });
+        });
+        req.on('error', (err) => reject(err));
+        req.setTimeout(8000, () => {
+          req.destroy();
+          reject(new Error('TikTok API connection timed out'));
+        });
+      });
+    };
+
+    try {
+      return await queryTikWm(resolvedUrl);
+    } catch (err) {
+      if (resolvedUrl !== url) {
+        return await queryTikWm(url);
+      }
+      throw err;
+    }
+  }
+
   _detectPlatform(url, extractor = '') {
     const u = url.toLowerCase();
     const ext = (extractor || '').toLowerCase();
 
     if (u.includes('youtube.com') || u.includes('youtu.be') || ext.includes('youtube')) return 'youtube';
-    if (u.includes('tiktok.com') || ext.includes('tiktok')) return 'tiktok';
+    if (u.includes('tiktok.com') || u.includes('vm.tiktok') || u.includes('vt.tiktok') || ext.includes('tiktok')) return 'tiktok';
     if (u.includes('spotify.com')) return 'spotify';
     if (u.includes('instagram.com') || ext.includes('instagram')) return 'instagram';
     if (u.includes('twitter.com') || u.includes('x.com') || ext.includes('twitter')) return 'twitter';
@@ -230,19 +351,79 @@ class Downloader {
       jobId,
       url,
       outputDir,
-      preset = 'best_video', // 'best_video' | '1080p' | '4k' | 'mp3_320' | 'flac' | 'wav' | 'tiktok_clean' | 'custom'
+      preset = 'best_video',
       customOptions = {},
     } = jobConfig;
 
+    if (!isDomainAllowed(url)) {
+      throw new Error('This domain is blocked by security policy.');
+    }
+
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
+
+    // Safely destructure custom options with defaults to prevent ReferenceError
+    const {
+      mediaType = 'video',
+      format = 'mp4',
+      resolution = 'best',
+      fastReencode = false,
+      audioFormat = 'mp3',
+      audioBitrate = '320k',
+      embedThumbnail = true,
+      downloadSubtitles = false,
+      subLangs = 'all',
+      embedSubtitles = false,
+      rateLimit = null,
+      cookiesBrowser = null,
+      extraArgs = '',
+    } = customOptions || {};
+
+    const isTikTok = this._isTikTokUrl(url);
+
+    // If it's a TikTok URL, use TikWM direct download to bypass login walls and get clean no-watermark video
+    if (isTikTok) {
+      try {
+        const tikTokInfo = await this._inspectTikTok(url);
+        const isAudioPreset = preset === 'mp3_320' || preset === 'flac' || preset === 'wav' || preset === 'aac'
+          || (preset === 'custom' && mediaType === 'audio');
+
+        if (isAudioPreset && (tikTokInfo.tiktokDirectAudio || tikTokInfo.tiktokDirectVideo)) {
+          if (onLog) onLog('[TikTok Engine] Extracting clean audio track via TikWM stream...');
+          return await this._downloadDirectTikTokAudio(
+            tikTokInfo.tiktokDirectAudio || tikTokInfo.tiktokDirectVideo,
+            outputDir,
+            jobConfig,
+            tikTokInfo.title,
+            preset,
+            customOptions,
+            onProgress,
+            onLog
+          );
+        } else if (tikTokInfo.tiktokDirectVideo) {
+          if (onLog) onLog('[TikTok Engine] Downloading clean MP4 video (No Watermark) via TikWM...');
+          return await this._downloadDirectTikTokVideo(
+            tikTokInfo.tiktokDirectVideo,
+            outputDir,
+            jobConfig,
+            tikTokInfo.title,
+            fastReencode,
+            onProgress,
+            onLog
+          );
+        }
+      } catch (ttErr) {
+        if (onLog) onLog(`[TikTok Warning] Direct download fallback: ${ttErr.message}. Trying yt-dlp...`);
+      }
+    }
+
+    // Standard download via yt-dlp
     if (!this.engineManager.ytDlpPath) {
       await this.engineManager.detect();
     }
     if (!this.engineManager.ytDlpPath) {
       throw new Error('yt-dlp is missing. Download it from the Settings tab.');
-    }
-
-    if (!fs.existsSync(outputDir)) {
-      fs.mkdirSync(outputDir, { recursive: true });
     }
 
     let downloadUrl = url;
@@ -300,7 +481,7 @@ class Downloader {
     } else if (preset === 'mp3_320') {
       args.push('-x');
       args.push('--audio-format', 'mp3');
-      args.push('--audio-quality', '0'); // 320k CBR / highest VBR
+      args.push('--audio-quality', '0');
       args.push('--embed-thumbnail');
     } else if (preset === 'flac') {
       args.push('-x');
@@ -316,22 +497,6 @@ class Downloader {
       args.push('--audio-quality', '0');
       args.push('--embed-thumbnail');
     } else if (preset === 'custom') {
-      // Power user custom configurations
-      const {
-        mediaType = 'video', // 'video' | 'audio'
-        format = 'mp4',
-        resolution = 'best',
-        audioFormat = 'mp3',
-        audioBitrate = '320k',
-        embedThumbnail = true,
-        downloadSubtitles = false,
-        subLangs = 'all',
-        embedSubtitles = false,
-        rateLimit = null,
-        cookiesBrowser = null,
-        extraArgs = '',
-      } = customOptions;
-
       if (mediaType === 'audio') {
         args.push('-x');
         args.push('--audio-format', audioFormat);
@@ -374,11 +539,9 @@ class Downloader {
         args.push('--cookies-from-browser', cookiesBrowser);
       }
 
-      // Safe parse extra arguments
       if (extraArgs && typeof extraArgs === 'string') {
         const extraList = extraArgs.trim().split(/\s+/).filter(Boolean);
         for (const ea of extraList) {
-          // Block dangerous arguments that might attempt shell execution
           if (!ea.startsWith('--exec') && !ea.startsWith('--config-location')) {
             args.push(ea);
           }
@@ -386,7 +549,6 @@ class Downloader {
       }
     }
 
-    // Global speed limits or browser cookies from config if provided
     if (jobConfig.globalRateLimit && jobConfig.globalRateLimit !== 'unlimited') {
       args.push('--limit-rate', jobConfig.globalRateLimit);
     }
@@ -403,7 +565,6 @@ class Downloader {
     return new Promise((resolve, reject) => {
       const proc = spawn(this.engineManager.ytDlpPath, args, { windowsHide: true });
       let finalFilePath = null;
-      let lastPercent = 0;
 
       this.activeJobs.set(jobId, { proc, config: jobConfig, outputDir });
 
@@ -414,8 +575,6 @@ class Downloader {
         for (const line of lines) {
           if (onLog) onLog(line);
 
-          // Parse download progress
-          // e.g. [download]  45.3% of ~102.50MiB at  12.45MiB/s ETA 00:05
           if (line.includes('[download]')) {
             const percentMatch = line.match(/(\d+\.?\d*)%/);
             const sizeMatch = line.match(/of\s+~?(\d+\.?\d*)\s*([KkMmGgTt]i?B)/i);
@@ -424,7 +583,6 @@ class Downloader {
 
             if (percentMatch) {
               const percent = parseFloat(percentMatch[1]);
-              lastPercent = percent;
               if (onProgress) {
                 onProgress({
                   jobId,
@@ -438,14 +596,12 @@ class Downloader {
               }
             }
 
-            // Capture output file path if destination logged
             const destMatch = line.match(/Destination:\s*(.+)$/i);
             if (destMatch && destMatch[1]) {
               finalFilePath = destMatch[1].trim();
             }
           }
 
-          // Merge / Conversion progress
           if (line.includes('[Merger]') || line.includes('[ExtractAudio]')) {
             if (onProgress) {
               onProgress({
@@ -476,7 +632,6 @@ class Downloader {
         this.activeJobs.delete(jobId);
 
         if (code === 0) {
-          // If destination file path was not captured in stdout, look in outputDir for newly created files
           if (!finalFilePath || !fs.existsSync(finalFilePath)) {
             try {
               const files = fs.readdirSync(outputDir).map((f) => path.join(outputDir, f));
@@ -510,26 +665,232 @@ class Downloader {
   }
 
   /**
+   * Direct high-speed download for TikTok video streams (bypasses login wall, zero watermark)
+   */
+  async _downloadDirectTikTokVideo(videoUrl, outputDir, jobConfig, title, fastReencode, onProgress, onLog) {
+    const { jobId } = jobConfig;
+    const safeTitle = (title || 'TikTok_Video').replace(/[\\/:*?"<>|]/g, '_').slice(0, 90).trim();
+    const finalPath = path.join(outputDir, `${safeTitle}.mp4`);
+    const tempPath = path.join(outputDir, `${safeTitle}_temp_${Date.now()}.mp4`);
+
+    await this._downloadHttpMedia(videoUrl, tempPath, jobId, onProgress, onLog);
+
+    // Fast re-encode if requested by power user
+    if (fastReencode && this.engineManager.ffmpegPath) {
+      if (onLog) onLog('[TikTok Engine] Fast re-encoding video with FFmpeg...');
+      if (onProgress) onProgress({ jobId, status: 'converting', percent: 99, speed: null, eta: null });
+
+      const encoder = this.engineManager.status?.hardwareAccels?.nvenc ? 'h264_nvenc' : this.engineManager.status?.hardwareAccels?.qsv ? 'h264_qsv' : 'libx264';
+      const reencodePath = path.join(outputDir, `${safeTitle}_reencoded.mp4`);
+
+      await new Promise((res, rej) => {
+        const proc = spawn(this.engineManager.ffmpegPath, [
+          '-y', '-i', tempPath,
+          '-c:v', encoder,
+          '-preset', 'fast',
+          '-c:a', 'aac', '-b:a', '192k',
+          reencodePath,
+        ], { windowsHide: true });
+
+        proc.on('close', (code) => {
+          try { fs.unlinkSync(tempPath); } catch (e) {}
+          if (code === 0 && fs.existsSync(reencodePath)) {
+            if (fs.existsSync(finalPath)) try { fs.unlinkSync(finalPath); } catch (e) {}
+            fs.renameSync(reencodePath, finalPath);
+            res();
+          } else {
+            // fallback to original temp file if re-encode failed
+            if (fs.existsSync(tempPath)) fs.renameSync(tempPath, finalPath);
+            res();
+          }
+        });
+        proc.on('error', () => {
+          if (fs.existsSync(tempPath)) fs.renameSync(tempPath, finalPath);
+          res();
+        });
+      });
+    } else {
+      if (fs.existsSync(finalPath)) try { fs.unlinkSync(finalPath); } catch (e) {}
+      fs.renameSync(tempPath, finalPath);
+    }
+
+    const outputSize = fs.existsSync(finalPath) ? fs.statSync(finalPath).size : 0;
+    return { jobId, outputPath: finalPath, outputSize };
+  }
+
+  /**
+   * Direct high-speed download for TikTok audio tracks (converted to MP3/FLAC via FFmpeg)
+   */
+  async _downloadDirectTikTokAudio(audioUrl, outputDir, jobConfig, title, preset, customOptions, onProgress, onLog) {
+    const { jobId } = jobConfig;
+    const safeTitle = (title || 'TikTok_Audio').replace(/[\\/:*?"<>|]/g, '_').slice(0, 90).trim();
+    const isFlac = preset === 'flac' || (preset === 'custom' && customOptions?.audioFormat === 'flac');
+    const ext = isFlac ? 'flac' : 'mp3';
+    const finalPath = path.join(outputDir, `${safeTitle}.${ext}`);
+    const tempPath = path.join(outputDir, `${safeTitle}_temp_${Date.now()}.bin`);
+
+    await this._downloadHttpMedia(audioUrl, tempPath, jobId, onProgress, onLog);
+
+    if (this.engineManager.ffmpegPath) {
+      if (onLog) onLog(`[TikTok Engine] Converting audio to ${ext.toUpperCase()} with FFmpeg...`);
+      if (onProgress) onProgress({ jobId, status: 'converting', percent: 99, speed: null, eta: null });
+
+      const ffmpegArgs = ['-y', '-i', tempPath, '-vn'];
+      if (isFlac) {
+        ffmpegArgs.push('-c:a', 'flac');
+      } else {
+        ffmpegArgs.push('-c:a', 'libmp3lame', '-b:a', '320k');
+      }
+      ffmpegArgs.push(finalPath);
+
+      await new Promise((res, rej) => {
+        const proc = spawn(this.engineManager.ffmpegPath, ffmpegArgs, { windowsHide: true });
+        proc.on('close', (code) => {
+          try { fs.unlinkSync(tempPath); } catch (e) {}
+          if (code === 0 && fs.existsSync(finalPath)) res();
+          else rej(new Error('Audio conversion failed.'));
+        });
+        proc.on('error', (err) => {
+          try { fs.unlinkSync(tempPath); } catch (e) {}
+          rej(err);
+        });
+      });
+    } else {
+      if (fs.existsSync(finalPath)) try { fs.unlinkSync(finalPath); } catch (e) {}
+      fs.renameSync(tempPath, finalPath);
+    }
+
+    const outputSize = fs.existsSync(finalPath) ? fs.statSync(finalPath).size : 0;
+    return { jobId, outputPath: finalPath, outputSize };
+  }
+
+  /**
+   * Streaming HTTP downloader with realtime speed, ETA, and progress percent
+   */
+  _downloadHttpMedia(downloadUrl, destPath, jobId, onProgress, onLog) {
+    return new Promise((resolve, reject) => {
+      let abortController = new AbortController();
+      let fileStream = fs.createWriteStream(destPath);
+      let startTime = Date.now();
+      let downloadedBytes = 0;
+      let lastReportTime = Date.now();
+
+      this.activeJobs.set(jobId, {
+        abortFn: () => {
+          try { abortController.abort(); } catch (e) {}
+          try { fileStream.destroy(); } catch (e) {}
+          try { if (fs.existsSync(destPath)) fs.unlinkSync(destPath); } catch (e) {}
+        },
+        outputDir: path.dirname(destPath),
+      });
+
+      const protocol = downloadUrl.startsWith('https') ? https : http;
+      const options = {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          'Referer': 'https://www.tiktok.com/',
+        },
+        signal: abortController.signal,
+      };
+
+      const req = protocol.get(downloadUrl, options, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          fileStream.close();
+          return resolve(this._downloadHttpMedia(res.headers.location, destPath, jobId, onProgress, onLog));
+        }
+
+        if (res.statusCode !== 200) {
+          fileStream.close();
+          try { fs.unlinkSync(destPath); } catch (e) {}
+          this.activeJobs.delete(jobId);
+          return reject(new Error(`Download stream failed: HTTP ${res.statusCode}`));
+        }
+
+        const totalBytes = parseInt(res.headers['content-length'] || 0, 10);
+
+        res.on('data', (chunk) => {
+          downloadedBytes += chunk.length;
+          const now = Date.now();
+
+          // Report progress every 200ms
+          if (now - lastReportTime > 200) {
+            lastReportTime = now;
+            const elapsedSec = (now - startTime) / 1000;
+            const bytesPerSec = elapsedSec > 0 ? downloadedBytes / elapsedSec : 0;
+            const speedMb = (bytesPerSec / 1024 / 1024).toFixed(2);
+            const percent = totalBytes > 0 ? Math.min(99, Math.round((downloadedBytes / totalBytes) * 100)) : 50;
+            const remainingSec = bytesPerSec > 0 && totalBytes > downloadedBytes ? Math.round((totalBytes - downloadedBytes) / bytesPerSec) : 0;
+            const etaMins = Math.floor(remainingSec / 60);
+            const etaSecs = remainingSec % 60;
+            const eta = `${etaMins.toString().padStart(2, '0')}:${etaSecs.toString().padStart(2, '0')}`;
+
+            if (onProgress) {
+              onProgress({
+                jobId,
+                status: 'downloading',
+                percent,
+                speed: `${speedMb} MiB/s`,
+                totalSize: totalBytes > 0 ? `${(totalBytes / 1024 / 1024).toFixed(1)} MiB` : null,
+                eta,
+              });
+            }
+          }
+        });
+
+        res.pipe(fileStream);
+
+        fileStream.on('finish', () => {
+          fileStream.close();
+          this.activeJobs.delete(jobId);
+          resolve();
+        });
+
+        fileStream.on('error', (err) => {
+          try { fs.unlinkSync(destPath); } catch (e) {}
+          this.activeJobs.delete(jobId);
+          reject(err);
+        });
+      });
+
+      req.on('error', (err) => {
+        try { fs.unlinkSync(destPath); } catch (e) {}
+        this.activeJobs.delete(jobId);
+        reject(err);
+      });
+    });
+  }
+
+  /**
    * Cancel an ongoing download cleanly and delete partial files
    */
   cancelDownload(jobId) {
     const job = this.activeJobs.get(jobId);
     if (!job) return false;
 
-    try {
-      if (process.platform === 'win32' && job.proc.pid) {
-        execSync(`taskkill /F /T /PID ${job.proc.pid}`, { stdio: 'ignore', windowsHide: true });
-      } else {
-        job.proc.kill('SIGKILL');
-      }
-    } catch (e) {}
+    // Direct HTTP download abort
+    if (job.abortFn) {
+      try { job.abortFn(); } catch (e) {}
+      this.activeJobs.delete(jobId);
+      return true;
+    }
+
+    // Process kill
+    if (job.proc) {
+      try {
+        if (process.platform === 'win32' && job.proc.pid) {
+          execSync(`taskkill /F /T /PID ${job.proc.pid}`, { stdio: 'ignore', windowsHide: true });
+        } else {
+          job.proc.kill('SIGKILL');
+        }
+      } catch (e) {}
+    }
 
     // Clean up partial .part or .ytdl files in outputDir
     try {
       if (job.outputDir && fs.existsSync(job.outputDir)) {
         const files = fs.readdirSync(job.outputDir);
         for (const file of files) {
-          if (file.endsWith('.part') || file.endsWith('.ytdl')) {
+          if (file.endsWith('.part') || file.endsWith('.ytdl') || file.includes('_temp_')) {
             try { fs.unlinkSync(path.join(job.outputDir, file)); } catch (e) {}
           }
         }
