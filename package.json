@@ -1,0 +1,75 @@
+{
+  "name": "itzdownloader-desktop",
+  "version": "1.0.0",
+  "description": "itzDownloader Desktop — Ultra-Fast, 100% Local Video & Audio Suite for Windows",
+  "productName": "itzDownloader Desktop",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "electron": "electron .",
+    "start": "concurrently -k \"vite\" \"wait-on tcp:5173 && electron .\"",
+    "dist": "vite build && electron-builder --win --x64",
+    "dist:portable": "vite build && electron-builder --win portable --x64",
+    "release": "node scripts/publish-release.js"
+  },
+  "build": {
+    "appId": "it.itzcrih.itzdownloader.desktop",
+    "productName": "itzDownloader Desktop",
+    "compression": "maximum",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json",
+      "!**/*.map"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "public/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "itzDownloader Desktop",
+      "differentialPackage": false
+    }
+  },
+  "keywords": [
+    "video",
+    "audio",
+    "downloader",
+    "youtube",
+    "tiktok",
+    "spotify",
+    "instagram",
+    "yt-dlp",
+    "ffmpeg",
+    "desktop",
+    "windows"
+  ],
+  "author": "itzcrih",
+  "license": "SEE LICENSE IN LICENSE",
+  "dependencies": {
+    "adm-zip": "^0.5.16"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^34.3.0",
+    "electron-builder": "^25.1.8",
+    "lucide-react": "^1.16.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "vite": "^6.2.0",
+    "wait-on": "^8.0.3"
+  }
+}
