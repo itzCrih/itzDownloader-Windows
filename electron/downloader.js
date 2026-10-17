@@ -4,6 +4,62 @@ const fs = require('fs');
 const https = require('https');
 const http = require('http');
 
+const WHITELIST_DOMAINS = [
+  'youtube.com', 'youtu.be', 'm.youtube.com', 'music.youtube.com',
+  'tiktok.com', 'vm.tiktok.com', 'm.tiktok.com',
+  'spotify.com', 'open.spotify.com',
+  'instagram.com', 'instagr.am', 'threads.net',
+  'twitter.com', 'x.com', 't.co',
+  'soundcloud.com', 'm.soundcloud.com', 'on.soundcloud.com',
+  'twitch.tv', 'clips.twitch.tv',
+  'facebook.com', 'fb.watch', 'fb.com', 'm.facebook.com',
+  'reddit.com', 'v.redd.it', 'redd.it',
+  'vimeo.com', 'player.vimeo.com',
+  'pinterest.com', 'pin.it',
+  'dailymotion.com', 'dai.ly',
+  'bilibili.com', 'b23.tv',
+  'bandcamp.com', 'podcasts.apple.com',
+  'streamable.com', 'kick.com',
+];
+
+function isDomainAllowed(targetUrl = '') {
+  try {
+    const raw = targetUrl.trim();
+    if (!raw) return false;
+    const parsed = new URL(raw.startsWith('http') ? raw : `https://${raw}`);
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
+    return WHITELIST_DOMAINS.some((d) => host === d || host.endsWith(`.${d}`));
+  } catch (e) {
+    return false;
+  }
+}
+
+function formatYtDlpError(errText = '') {
+  const e = (errText || '').toLowerCase();
+  if (e.includes('sign in to confirm your age') || e.includes('confirm you’re not a bot') || e.includes('sign in to confirm you’re not a bot')) {
+    return 'Age-restricted or verification check detected. Select your browser in Cookies (under Advanced or Settings) to download seamlessly.';
+  }
+  if (e.includes('private video') || e.includes('this video is private')) {
+    return 'This video is marked Private by its uploader and cannot be accessed.';
+  }
+  if (e.includes('members-only') || e.includes('join this channel')) {
+    return 'This video is restricted to channel members. Connect your browser cookies if you have a membership.';
+  }
+  if (e.includes('video unavailable') || e.includes('has been removed') || e.includes('not available')) {
+    return 'This media is unavailable or was deleted by the creator.';
+  }
+  if (e.includes('http error 429') || e.includes('too many requests')) {
+    return 'Platform rate limit encountered (HTTP 429). Please wait a moment before trying again.';
+  }
+  if (e.includes('live stream') || e.includes('is live')) {
+    return 'This live stream is currently recording or broadcasting. Downloading will be available once the stream finishes.';
+  }
+  if (e.includes('georestricted') || e.includes('not available in your country')) {
+    return 'This content is geo-blocked by the uploader in your region.';
+  }
+  return errText.split(/\r?\n/)[0] || 'Download failed. Please check the URL and network connection.';
+}
+
 class Downloader {
   constructor(engineManager) {
     this.engineManager = engineManager;
@@ -18,6 +74,10 @@ class Downloader {
       throw new Error('Please enter a valid URL.');
     }
     const cleanUrl = targetUrl.trim();
+
+    if (!isDomainAllowed(cleanUrl)) {
+      throw new Error('This domain is not in the verified whitelist. Only safe, trusted platforms (YouTube, TikTok, Spotify, Instagram, Twitter, SoundCloud, Twitch, etc.) are allowed.');
+    }
 
     // Check for Spotify URLs
     if (cleanUrl.includes('spotify.com/')) {
@@ -286,6 +346,14 @@ class Downloader {
             args.push('-f', `bv*[height<=${h}]+ba/b[height<=${h}] / bv*+ba/b`);
           }
         }
+        if (fastReencode) {
+          args.push('--recode-video', 'mp4');
+          if (this.engineManager.status?.hardwareAccels?.nvenc) {
+            args.push('--postprocessor-args', 'VideoConvertor:-c:v h264_nvenc');
+          } else if (this.engineManager.status?.hardwareAccels?.qsv) {
+            args.push('--postprocessor-args', 'VideoConvertor:-c:v h264_qsv');
+          }
+        }
         args.push('--merge-output-format', format || 'mp4');
         if (embedThumbnail) args.push('--embed-thumbnail');
 
@@ -397,8 +465,10 @@ class Downloader {
         }
       });
 
+      let accumulatedStderr = '';
       proc.stderr.on('data', (data) => {
         const text = data.toString();
+        accumulatedStderr += text;
         if (onLog) onLog(`[stderr] ${text}`);
       });
 
@@ -427,7 +497,8 @@ class Downloader {
             outputSize,
           });
         } else {
-          reject(new Error(`Download failed with exit code ${code}. Check logs or verify link validity.`));
+          const userFriendly = formatYtDlpError(accumulatedStderr);
+          reject(new Error(userFriendly));
         }
       });
 

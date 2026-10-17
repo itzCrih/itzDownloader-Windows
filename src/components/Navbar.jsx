@@ -1,11 +1,11 @@
 import React from 'react';
-import { Zap, Sliders, Layers, Settings } from 'lucide-react';
+import { ArrowDownToLine, Sliders, Layers, Settings } from 'lucide-react';
 import BrandLogo from './BrandLogo';
 
 export default function Navbar({ activeTab, setActiveTab, activeJobsCount, onResetApp }) {
   const tabs = [
-    { id: 'instant', label: 'Instant Download', icon: Zap },
-    { id: 'studio', label: 'Studio & Custom', icon: Sliders },
+    { id: 'instant', label: 'Download', icon: ArrowDownToLine },
+    { id: 'studio', label: 'Advanced', icon: Sliders },
     { id: 'queue', label: 'Queue', icon: Layers, count: activeJobsCount },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
@@ -18,29 +18,31 @@ export default function Navbar({ activeTab, setActiveTab, activeJobsCount, onRes
 
   return (
     <nav className="navbar">
-      <div className="navbar-brand-section">
+      <div className="navbar-left">
         <BrandLogo onClick={onResetApp} />
       </div>
 
-      <div className="nav-tabs">
-        {tabs.map((tab) => {
-          const Icon = tab.icon;
-          const isActive = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              className={`nav-tab-btn ${isActive ? 'active' : ''}`}
-              onClick={() => setActiveTab(tab.id)}
-            >
-              <Icon size={16} />
-              <span>{tab.label}</span>
-              {tab.count > 0 && <span className="nav-badge-count">{tab.count}</span>}
-            </button>
-          );
-        })}
+      <div className="navbar-center">
+        <div className="nav-tabs">
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                className={`nav-tab-btn ${isActive ? 'active' : ''}`}
+                onClick={() => setActiveTab(tab.id)}
+              >
+                <Icon size={15} />
+                <span>{tab.label}</span>
+                {tab.count > 0 && <span className="nav-badge-count">{tab.count}</span>}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      <div className="nav-right-actions">
+      <div className="navbar-right">
         {/* Discord Community Button */}
         <button
           className="btn-discord"

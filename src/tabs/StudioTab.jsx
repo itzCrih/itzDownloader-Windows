@@ -14,7 +14,9 @@ import {
   ChevronDown,
   Layers,
   Sparkles,
-  Link2
+  Link2,
+  Zap,
+  AlertTriangle
 } from 'lucide-react';
 import { detectPlatform } from '../utils/platformDetect';
 import { formatDuration } from '../utils/formatters';
@@ -32,10 +34,11 @@ export default function StudioTab({
   const [isInspecting, setIsInspecting] = useState(false);
   const [mediaInfo, setMediaInfo] = useState(initialMediaInfo);
 
-  // Studio Configurations
+  // Advanced Configurations
   const [mediaType, setMediaType] = useState('video'); // 'video' | 'audio'
   const [videoContainer, setVideoContainer] = useState('mp4'); // 'mp4' | 'mkv' | 'webm'
   const [resolution, setResolution] = useState('best'); // 'best' | '2160' | '1440' | '1080' | '720' | '480'
+  const [fastReencode, setFastReencode] = useState(false); // User requested: Fast Re-encoding in MP4
   const [audioFormat, setAudioFormat] = useState('mp3'); // 'mp3' | 'flac' | 'wav' | 'aac' | 'opus' | 'ogg'
   const [audioBitrate, setAudioBitrate] = useState('320k'); // '320k' | '256k' | '192k' | '128k'
   const [embedThumbnail, setEmbedThumbnail] = useState(true);
@@ -68,6 +71,11 @@ export default function StudioTab({
       return;
     }
 
+    if (!platform.isAllowed) {
+      onShowToast('This domain is not in the verified whitelist.', 'error');
+      return;
+    }
+
     setIsInspecting(true);
     try {
       const info = await window.itzDownloaderAPI.inspectUrl(clean, { cookiesBrowser });
@@ -87,6 +95,11 @@ export default function StudioTab({
     const clean = url.trim();
     if (!clean) {
       onShowToast('Please enter a media URL.', 'warning');
+      return;
+    }
+
+    if (!platform.isAllowed) {
+      onShowToast('This domain is blocked by security policy.', 'error');
       return;
     }
 
@@ -110,6 +123,7 @@ export default function StudioTab({
         mediaType,
         format: videoContainer,
         resolution,
+        fastReencode: mediaType === 'video' ? fastReencode : false,
         audioFormat,
         audioBitrate,
         embedThumbnail,
@@ -129,15 +143,15 @@ export default function StudioTab({
 
   return (
     <div className="tab-pane-container">
-      {/* Studio Header */}
+      {/* Advanced Header */}
       <div className="studio-header-bar">
         <div className="studio-header-left">
           <div className="studio-icon-badge">
             <Sliders size={18} color="#e6b422" />
           </div>
           <div>
-            <h2 className="studio-title">Media Studio & Advanced Customizer</h2>
-            <p className="studio-subtitle">Full granular control over video codecs, audio bitrates, subtitles, and containers.</p>
+            <h2 className="studio-title">Advanced Media Suite</h2>
+            <p className="studio-subtitle">Granular control over codecs, hardware fast re-encoding, audio bitrates, and cookies.</p>
           </div>
         </div>
       </div>
@@ -149,8 +163,15 @@ export default function StudioTab({
             <Link2 size={16} color="#e6b422" />
             <span className="card-title">Target Media Source</span>
           </div>
-          {mediaInfo && (
-            <span className="platform-detected-pill" style={{ background: platform.badgeBg, color: platform.color, borderColor: platform.badgeBorder }}>
+          {url.trim() && (
+            <span
+              className="platform-detected-pill"
+              style={{
+                background: platform.badgeBg,
+                color: platform.color,
+                borderColor: platform.badgeBorder,
+              }}
+            >
               {platform.name}
             </span>
           )}
@@ -160,18 +181,25 @@ export default function StudioTab({
           <input
             type="text"
             className="form-input"
-            placeholder="Enter media URL (YouTube, TikTok, Instagram, Spotify, Vimeo, etc.)..."
+            placeholder="Enter media URL (YouTube, TikTok, Instagram, Spotify, Vimeo, Twitter)..."
             value={url}
             onChange={(e) => setUrl(e.target.value)}
           />
           <button
             className="btn-secondary"
             onClick={handleInspect}
-            disabled={isInspecting || !url.trim()}
+            disabled={isInspecting || !url.trim() || !platform.isAllowed}
           >
             <span>{isInspecting ? 'Inspecting...' : 'Probe Metadata'}</span>
           </button>
         </div>
+
+        {url.trim() && !platform.isAllowed && (
+          <div className="whitelist-blocked-banner">
+            <AlertTriangle size={15} color="#f85149" />
+            <span>Domain is not in the whitelist. Only verified platforms are supported.</span>
+          </div>
+        )}
 
         {mediaInfo && (
           <div className="studio-media-snippet">
@@ -189,7 +217,7 @@ export default function StudioTab({
         )}
       </div>
 
-      {/* Studio Category Switcher */}
+      {/* Advanced Category Switcher */}
       <div className="studio-type-switcher-bar">
         <button
           className={`type-switch-btn ${mediaType === 'video' ? 'active' : ''}`}
@@ -257,6 +285,31 @@ export default function StudioTab({
               </select>
               <span className="form-hint">Cap the resolution to save disk space or download at maximum native source.</span>
             </div>
+          </div>
+
+          {/* Fast Re-encoding Option (User Requested!) */}
+          <div className="reencode-highlight-card">
+            <div className="reencode-highlight-left">
+              <div className="reencode-icon-box">
+                <Zap size={18} color="#e6b422" />
+              </div>
+              <div>
+                <div className="reencode-title">Fast Re-encoding (FFmpeg H.264 MP4)</div>
+                <div className="reencode-desc">
+                  Re-encodes video stream to standard H.264 MP4 using hardware acceleration
+                  {engineStatus?.hardwareAccels?.nvenc ? ' (NVIDIA NVENC active)' : engineStatus?.hardwareAccels?.qsv ? ' (Intel QSV active)' : ''}.
+                  Guarantees 100% playback on video editors (Premiere, DaVinci, Vegas) and Discord.
+                </div>
+              </div>
+            </div>
+            <label className="switch">
+              <input
+                type="checkbox"
+                checked={fastReencode}
+                onChange={(e) => setFastReencode(e.target.checked)}
+              />
+              <span className="slider round"></span>
+            </label>
           </div>
 
           {/* Subtitles & Cover Art */}
@@ -384,7 +437,7 @@ export default function StudioTab({
         >
           <div className="card-title-group">
             <Settings2 size={16} color="#e6b422" />
-            <span className="card-title">Advanced Network & Engine Flags</span>
+            <span className="card-title">Network & Engine Customization</span>
           </div>
           <ChevronDown
             size={16}
@@ -462,10 +515,10 @@ export default function StudioTab({
           <button
             className="btn-download-primary"
             onClick={handleStartCustomDownload}
-            disabled={!url.trim()}
+            disabled={!url.trim() || !platform.isAllowed}
           >
             <Sparkles size={17} />
-            <span>Start Studio Download</span>
+            <span>Start Advanced Download</span>
           </button>
         </div>
       </div>

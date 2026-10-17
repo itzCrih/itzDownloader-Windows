@@ -183,8 +183,8 @@ class EngineManager {
     if (!this.ffmpegPath) return false;
     try {
       execSync(
-        `"${this.ffmpegPath}" -f lavfi -i color=c=black:s=64x64:d=0.1 -c:v ${encoderName} -f null -`,
-        { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 3000, windowsHide: true }
+        `"${this.ffmpegPath}" -f lavfi -i color=c=black:s=256x256:d=0.1 -c:v ${encoderName} -f null -`,
+        { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 3500, windowsHide: true }
       );
       return true;
     } catch (e) {
@@ -201,24 +201,46 @@ class EngineManager {
 
       if (process.platform === 'win32') {
         try {
-          const wmicOut = execSync('wmic path win32_VideoController get caption /format:table', {
+          // Use PowerShell Get-CimInstance for Windows 10/11 compatibility (wmic is deprecated)
+          const psOut = execSync('powershell -NoProfile -Command "(Get-CimInstance Win32_VideoController).Caption"', {
             encoding: 'utf8',
             stdio: ['pipe', 'pipe', 'ignore'],
-            timeout: 3000,
+            timeout: 4000,
             windowsHide: true,
           });
-          const lines = wmicOut
+          const lines = psOut
             .split(/\r?\n/)
             .map((l) => l.trim())
             .filter((l) => l && !l.toLowerCase().includes('caption'));
           if (lines.length > 0) {
             this.status.systemInfo.gpuDevices = lines;
             const dedicated = lines.find(
-              (g) => g.toLowerCase().includes('nvidia') || g.toLowerCase().includes('rtx') || g.toLowerCase().includes('gtx') || g.toLowerCase().includes('radeon')
+              (g) => g.toLowerCase().includes('nvidia') || g.toLowerCase().includes('geforce') || g.toLowerCase().includes('rtx') || g.toLowerCase().includes('gtx') || g.toLowerCase().includes('radeon')
             );
             this.status.systemInfo.primaryGpu = dedicated || lines[0];
           }
-        } catch (e) {}
+        } catch (e) {
+          // Fallback to wmic if powershell query fails
+          try {
+            const wmicOut = execSync('wmic path win32_VideoController get caption /format:table', {
+              encoding: 'utf8',
+              stdio: ['pipe', 'pipe', 'ignore'],
+              timeout: 3000,
+              windowsHide: true,
+            });
+            const lines = wmicOut
+              .split(/\r?\n/)
+              .map((l) => l.trim())
+              .filter((l) => l && !l.toLowerCase().includes('caption'));
+            if (lines.length > 0) {
+              this.status.systemInfo.gpuDevices = lines;
+              const dedicated = lines.find(
+                (g) => g.toLowerCase().includes('nvidia') || g.toLowerCase().includes('rtx') || g.toLowerCase().includes('gtx') || g.toLowerCase().includes('radeon')
+              );
+              this.status.systemInfo.primaryGpu = dedicated || lines[0];
+            }
+          } catch (wErr) {}
+        }
       }
     } catch (e) {}
   }

@@ -171,19 +171,38 @@ input, textarea, select {
   overflow: hidden;
 }
 
-/* Brand Logo Typography with Animated Gradient */
+/* Brand Logo Typography with Animated Gradient & Hover Micro-Interaction */
 .brand-logo-container {
   display: flex;
   align-items: center;
   gap: 10px;
   cursor: pointer;
-  padding: 2px 4px;
-  border-radius: 6px;
-  transition: opacity 0.2s ease;
+  padding: 3px 6px;
+  border-radius: 8px;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.brand-logo-container:hover {
-  opacity: 0.9;
+.brand-logo-container .animated-brand-box {
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.brand-logo-container:hover .animated-brand-box {
+  transform: scale(1.09) rotate(-5deg);
+  border-color: var(--gold-hover) !important;
+  box-shadow: 0 0 18px rgba(230, 180, 34, 0.45);
+}
+
+.brand-logo-container:hover .brand-download-icon {
+  animation: bounceArrow 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes bounceArrow {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(3px); }
+}
+
+.brand-logo-container:hover .brand-logo-text {
+  filter: brightness(1.15);
 }
 
 .brand-logo-text {
@@ -193,6 +212,7 @@ input, textarea, select {
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   text-shadow: 0 0 20px rgba(230, 180, 34, 0.2);
+  transition: filter 0.2s ease;
 }
 
 .text-gold-gradient {
@@ -201,24 +221,37 @@ input, textarea, select {
   -webkit-text-fill-color: transparent;
 }
 
-/* Navbar */
+/* Centered Navbar with 3-column Grid */
 .navbar {
   height: 56px;
   background: rgba(14, 18, 26, 0.85);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--border-subtle);
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  justify-content: space-between;
   padding: 0 20px;
   z-index: 900;
   flex-shrink: 0;
 }
 
-.navbar-brand-section {
+.navbar-left {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
+}
+
+.navbar-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.navbar-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
 }
 
 .nav-tabs {
@@ -545,6 +578,99 @@ input, textarea, select {
   padding: 2px 8px;
   border-radius: 4px;
   font-family: var(--font-mono);
+}
+
+/* Whitelist Blocked & Error Banners */
+.paste-hero-card.border-blocked {
+  border-color: rgba(248, 81, 73, 0.6) !important;
+  box-shadow: 0 0 20px rgba(248, 81, 73, 0.25) !important;
+}
+
+.whitelist-blocked-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: rgba(248, 81, 73, 0.1);
+  border: 1px solid rgba(248, 81, 73, 0.35);
+  color: #ff7b72;
+  font-size: 12.5px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  line-height: 1.45;
+}
+
+.whitelist-blocked-banner.warning {
+  background: rgba(210, 153, 34, 0.12);
+  border-color: rgba(210, 153, 34, 0.4);
+  color: #e3b341;
+}
+
+.blocked-text-col {
+  flex: 1;
+}
+
+/* Fast Re-encoding Highlight Card in Advanced Studio */
+.reencode-highlight-card {
+  background: rgba(230, 180, 34, 0.05);
+  border: 1px solid var(--border-gold);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.reencode-highlight-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.reencode-icon-box {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  background: var(--gold-subtle);
+  border: 1px solid var(--border-gold);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.reencode-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.reencode-desc {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  line-height: 1.35;
+  margin-top: 2px;
+}
+
+/* Media Type Badges */
+.media-type-badge {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.5px;
+}
+
+.media-type-badge.audio {
+  background: rgba(29, 185, 84, 0.15);
+  color: #1db954;
+  border: 1px solid rgba(29, 185, 84, 0.3);
+}
+
+.media-type-badge.video {
+  background: rgba(88, 166, 255, 0.15);
+  color: #58a6ff;
+  border: 1px solid rgba(88, 166, 255, 0.3);
 }
 
 /* Media Preview Card */
