@@ -38,10 +38,16 @@ contextBridge.exposeInMainWorld('itzDownloaderAPI', {
   downloadYtDlp: () => ipcRenderer.invoke('engine:downloadYtDlp'),
   updateYtDlp: () => ipcRenderer.invoke('engine:updateYtDlp'),
   downloadFfmpeg: () => ipcRenderer.invoke('engine:downloadFfmpeg'),
+  ensureAllEngines: () => ipcRenderer.invoke('engine:ensureAll'),
   onEngineDownloadProgress: (callback) => {
     const listener = (event, data) => callback(data);
     ipcRenderer.on('engine:download-progress', listener);
     return () => ipcRenderer.removeListener('engine:download-progress', listener);
+  },
+  onEngineInstallProgress: (callback) => {
+    const listener = (event, data) => callback(data);
+    ipcRenderer.on('engine:install-progress', listener);
+    return () => ipcRenderer.removeListener('engine:install-progress', listener);
   },
 
   // URL Inspection (metadata, formats, thumbnail, resolutions)

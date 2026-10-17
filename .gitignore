@@ -25,6 +25,9 @@ bin/
 .env*
 .env.local
 
+# Certificates private keys
+certs/*.pfx
+
 # Logs and Diagnostics
 *.log
 npm-debug.log*
