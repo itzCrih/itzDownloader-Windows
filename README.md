@@ -8,7 +8,7 @@
 The high-performance, private Windows workstation for instant video & audio downloads from YouTube, TikTok, Spotify, Instagram, and over 1,000+ online media platforms.
 
 [![Platform](https://img.shields.io/badge/Platform-Windows_10_%7C_11_(x64)-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/itzCrih/itzDownloader-Windows/releases/latest)
-[![Version](https://img.shields.io/badge/Version-v1.0.0-e6b422?style=for-the-badge)](https://github.com/itzCrih/itzDownloader-Windows/releases/latest)
+[![Version](https://img.shields.io/badge/Version-v1.0.1-e6b422?style=for-the-badge)](https://github.com/itzCrih/itzDownloader-Windows/releases/latest)
 [![Engine](https://img.shields.io/badge/yt--dlp-Native_v2025+-black?style=for-the-badge)](https://github.com/yt-dlp/yt-dlp)
 [![FFmpeg](https://img.shields.io/badge/FFmpeg-v7.1_Native-black?style=for-the-badge)](https://ffmpeg.org)
 [![License](https://img.shields.io/badge/License-Proprietary-red?style=for-the-badge)](LICENSE)
@@ -17,13 +17,13 @@ The high-performance, private Windows workstation for instant video & audio down
 
 ### Download itzDownloader Desktop
 
-[![Download Setup](https://img.shields.io/badge/Download_Installer-itzDownloader_Desktop_Setup_(v1.0.0)-e6b422?style=for-the-badge&logo=windows&logoColor=black)](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.0.0/itzDownloader-Desktop-Setup-1.0.0.exe)  
-[![Download Portable](https://img.shields.io/badge/Download_Portable-itzDownloader_Desktop_Portable_(v1.0.0)-ffffff?style=for-the-badge&logo=windows&logoColor=black)](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.0.0/itzDownloader-Desktop-1.0.0-Portable.exe)
+[![Download Setup](https://img.shields.io/badge/Download_Installer-itzDownloader_Desktop_Setup_(v1.0.1)-e6b422?style=for-the-badge&logo=windows&logoColor=black)](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.0.1/itzDownloader-Desktop-Setup-1.0.1.exe)  
+[![Download Portable](https://img.shields.io/badge/Download_Portable-itzDownloader_Desktop_Portable_(v1.0.1)-ffffff?style=for-the-badge&logo=windows&logoColor=black)](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.0.1/itzDownloader-Desktop-1.0.1-Portable.exe)
 
 | Package | Format | Architecture | Direct Link |
 | :--- | :--- | :--- | :--- |
-| **Windows Installer** | NSIS Setup `.exe` | Windows 10 / 11 (x64) | [itzDownloader-Desktop-Setup-1.0.0.exe](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.0.0/itzDownloader-Desktop-Setup-1.0.0.exe) |
-| **Standalone Portable** | Portable `.exe` | Windows 10 / 11 (x64) | [itzDownloader-Desktop-1.0.0-Portable.exe](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.0.0/itzDownloader-Desktop-1.0.0-Portable.exe) |
+| **Windows Installer** | NSIS Setup `.exe` | Windows 10 / 11 (x64) | [itzDownloader-Desktop-Setup-1.0.1.exe](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.0.1/itzDownloader-Desktop-Setup-1.0.1.exe) |
+| **Standalone Portable** | Portable `.exe` | Windows 10 / 11 (x64) | [itzDownloader-Desktop-1.0.1-Portable.exe](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.0.1/itzDownloader-Desktop-1.0.1-Portable.exe) |
 
 *Requires zero installation privileges for the portable build. Built-in Auto-Updater checks for future releases seamlessly on startup.*
 

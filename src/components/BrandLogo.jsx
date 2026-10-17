@@ -8,9 +8,9 @@ export default function BrandLogo({ onClick, size = 'default' }) {
       onClick={onClick}
       title={onClick ? 'Reset application & return to Home' : undefined}
     >
-      {/* Golden rounded rectangle with download icon */}
+      {/* Golden rounded rectangle with interactive animated download icon */}
       <div
-        className="brand-icon-rounded-box"
+        className="brand-icon-rounded-box animated-brand-box"
         style={{
           width: size === 'small' ? '28px' : '34px',
           height: size === 'small' ? '28px' : '34px',
