@@ -310,3 +310,133 @@ export function detectPlatform(url = '') {
     isVideoSupported: true,
   };
 }
+
+/**
+ * Validates whether a URL points to an actual downloadable media file
+ * rather than a generic home page, feed, channel, or profile.
+ */
+export function validateMediaUrl(targetUrl = '') {
+  const clean = (targetUrl || '').trim();
+  if (!clean) {
+    return { isValid: false, error: 'Please enter a URL.' };
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(clean.startsWith('http://') || clean.startsWith('https://') ? clean : `https://${clean}`);
+  } catch (e) {
+    return { isValid: false, error: 'The entered text is not a valid URL.' };
+  }
+
+  const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
+  const pathname = parsed.pathname.toLowerCase().replace(/\/+$/, '');
+  const search = parsed.search.toLowerCase();
+
+  // 1. Whitelist check
+  if (!isDomainAllowed(clean)) {
+    return {
+      isValid: false,
+      error: 'This domain is not in the verified whitelist. Only safe, trusted platforms (YouTube, TikTok, Spotify, Instagram, Twitter, etc.) are allowed.',
+    };
+  }
+
+  // 2. Root domain check (e.g. https://youtube.com, https://tiktok.com, https://open.spotify.com)
+  if ((pathname === '' || pathname === '/') && !search) {
+    return {
+      isValid: false,
+      error: `You entered the home page (${host}). Please provide a direct link to a video, song, reel, or track.`,
+    };
+  }
+
+  // 3. YouTube validation
+  if (host === 'youtube.com' || host === 'm.youtube.com' || host === 'music.youtube.com') {
+    const isVideo = pathname === '/watch' && (parsed.searchParams.has('v') || search.includes('v='));
+    const isShort = pathname.startsWith('/shorts/');
+    const isLive = pathname.startsWith('/live/');
+    const isEmbed = pathname.startsWith('/embed/');
+    const isPlaylist = pathname === '/playlist' && (parsed.searchParams.has('list') || search.includes('list='));
+
+    if (pathname.startsWith('/@') || pathname.startsWith('/channel/') || pathname.startsWith('/c/') || pathname.startsWith('/user/')) {
+      return {
+        isValid: false,
+        error: 'This link points to a YouTube channel or profile. Please paste a direct video or shorts link.',
+      };
+    }
+
+    if (pathname.startsWith('/feed') || pathname.startsWith('/trending') || pathname.startsWith('/explore')) {
+      return {
+        isValid: false,
+        error: 'This link points to a YouTube feed or trending tab, not a downloadable video.',
+      };
+    }
+
+    if (!isVideo && !isShort && !isLive && !isEmbed && !isPlaylist) {
+      return {
+        isValid: false,
+        error: 'Please enter a valid YouTube video link (e.g. https://youtube.com/watch?v=... or https://youtu.be/...)',
+      };
+    }
+  } else if (host === 'youtu.be') {
+    if (pathname === '' || pathname === '/') {
+      return {
+        isValid: false,
+        error: 'Please provide a valid youtu.be video link with an ID.',
+      };
+    }
+  }
+
+  // 4. TikTok validation
+  if (host === 'tiktok.com' || host.endsWith('.tiktok.com')) {
+    if (pathname.startsWith('/@') && !pathname.includes('/video/') && !pathname.includes('/photo/')) {
+      return {
+        isValid: false,
+        error: 'This link points to a TikTok user profile. Please provide a direct link to a TikTok video or sound.',
+      };
+    }
+    if (pathname === '/foryou' || pathname === '/explore' || pathname === '/live') {
+      return {
+        isValid: false,
+        error: 'This link points to a TikTok feed tab. Please provide a direct video link.',
+      };
+    }
+  }
+
+  // 5. Spotify validation
+  if (host === 'spotify.com' || host.endsWith('.spotify.com')) {
+    const isTrack = pathname.startsWith('/track/');
+    const isAlbum = pathname.startsWith('/album/');
+    const isPlaylist = pathname.startsWith('/playlist/');
+    const isEpisode = pathname.startsWith('/episode/');
+    if (!isTrack && !isAlbum && !isPlaylist && !isEpisode) {
+      return {
+        isValid: false,
+        error: 'Please provide a direct Spotify track, album, or playlist link (e.g. open.spotify.com/track/...)',
+      };
+    }
+  }
+
+  // 6. Instagram validation
+  if (host === 'instagram.com' || host.endsWith('.instagram.com')) {
+    const isPost = pathname.startsWith('/p/') || pathname.startsWith('/reel/') || pathname.startsWith('/reels/') || pathname.startsWith('/tv/');
+    if (!isPost) {
+      return {
+        isValid: false,
+        error: 'This link points to an Instagram profile or feed. Please provide a direct reel, post, or video link.',
+      };
+    }
+  }
+
+  // 7. Twitter / X validation
+  if (host === 'twitter.com' || host === 'x.com') {
+    const isStatus = pathname.includes('/status/');
+    if (!isStatus) {
+      return {
+        isValid: false,
+        error: 'This link points to a Twitter/X profile or feed. Please provide a direct tweet or post link containing media.',
+      };
+    }
+  }
+
+  return { isValid: true };
+}
+

@@ -16,7 +16,7 @@ import {
   Radio,
   FileAudio
 } from 'lucide-react';
-import { detectPlatform } from '../utils/platformDetect';
+import { detectPlatform, validateMediaUrl } from '../utils/platformDetect';
 import { formatDuration } from '../utils/formatters';
 
 export default function InstantTab({
@@ -58,12 +58,21 @@ export default function InstantTab({
     setIsDownloading(false);
   };
 
+  const handleUrlChange = (newVal) => {
+    setUrl(newVal);
+    if (inspectError) setInspectError(null);
+    if (mediaInfo) setMediaInfo(null);
+  };
+
   const inspectTargetUrl = async (targetUrl = url) => {
     const clean = (targetUrl || '').trim();
     setInspectError(null);
+    setMediaInfo(null);
 
-    if (!clean || (!clean.startsWith('http://') && !clean.startsWith('https://'))) {
-      onShowToast('Please enter a valid HTTP or HTTPS link.', 'warning');
+    const validation = validateMediaUrl(clean);
+    if (!validation.isValid) {
+      setInspectError(validation.error);
+      onShowToast(validation.error, 'error');
       return;
     }
 
@@ -80,11 +89,11 @@ export default function InstantTab({
     }
 
     setIsInspecting(true);
-    setMediaInfo(null);
 
     try {
       const info = await window.itzDownloaderAPI.inspectUrl(clean, {});
       setMediaInfo(info);
+      setInspectError(null);
 
       // Auto-select smart preset based on platform & content
       if (info.isAudioOnly || detected.isAudioOnly) {
@@ -102,6 +111,7 @@ export default function InstantTab({
         }
       }, 120);
     } catch (err) {
+      setMediaInfo(null);
       const msg = err.message || 'Inspection failed.';
       setInspectError(msg);
       onShowToast(msg, 'error');
@@ -193,10 +203,7 @@ export default function InstantTab({
             className="paste-input"
             placeholder="Paste video or audio link (YouTube, TikTok, Spotify, Instagram, Twitter)..."
             value={url}
-            onChange={(e) => {
-              setUrl(e.target.value);
-              setInspectError(null);
-            }}
+            onChange={(e) => handleUrlChange(e.target.value)}
             onKeyDown={handleKeyDown}
             autoFocus
           />

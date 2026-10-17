@@ -16,9 +16,10 @@ import {
   Sparkles,
   Link2,
   Zap,
-  AlertTriangle
+  AlertTriangle,
+  VolumeX
 } from 'lucide-react';
-import { detectPlatform } from '../utils/platformDetect';
+import { detectPlatform, validateMediaUrl } from '../utils/platformDetect';
 import { formatDuration } from '../utils/formatters';
 
 export default function StudioTab({
@@ -33,12 +34,14 @@ export default function StudioTab({
   const [url, setUrl] = useState(initialUrl || '');
   const [isInspecting, setIsInspecting] = useState(false);
   const [mediaInfo, setMediaInfo] = useState(initialMediaInfo);
+  const [inspectError, setInspectError] = useState(null);
 
   // Advanced Configurations
   const [mediaType, setMediaType] = useState('video'); // 'video' | 'audio'
   const [videoContainer, setVideoContainer] = useState('mp4'); // 'mp4' | 'mkv' | 'webm'
   const [resolution, setResolution] = useState('best'); // 'best' | '2160' | '1440' | '1080' | '720' | '480'
   const [fastReencode, setFastReencode] = useState(false); // User requested: Fast Re-encoding in MP4
+  const [noAudio, setNoAudio] = useState(false); // User requested: No Audio (Mute Video Stream)
   const [audioFormat, setAudioFormat] = useState('mp3'); // 'mp3' | 'flac' | 'wav' | 'aac' | 'opus' | 'ogg'
   const [audioBitrate, setAudioBitrate] = useState('320k'); // '320k' | '256k' | '192k' | '128k'
   const [embedThumbnail, setEmbedThumbnail] = useState(true);
@@ -64,14 +67,26 @@ export default function StudioTab({
 
   const platform = detectPlatform(url);
 
+  const handleUrlChange = (newVal) => {
+    setUrl(newVal);
+    if (inspectError) setInspectError(null);
+    if (mediaInfo) setMediaInfo(null);
+  };
+
   const handleInspect = async () => {
     const clean = url.trim();
-    if (!clean || (!clean.startsWith('http://') && !clean.startsWith('https://'))) {
-      onShowToast('Please enter a valid URL to inspect.', 'warning');
+    setInspectError(null);
+    setMediaInfo(null);
+
+    const validation = validateMediaUrl(clean);
+    if (!validation.isValid) {
+      setInspectError(validation.error);
+      onShowToast(validation.error, 'error');
       return;
     }
 
     if (!platform.isAllowed) {
+      setInspectError('This domain is not in the verified whitelist.');
       onShowToast('This domain is not in the verified whitelist.', 'error');
       return;
     }
@@ -80,12 +95,16 @@ export default function StudioTab({
     try {
       const info = await window.itzDownloaderAPI.inspectUrl(clean, { cookiesBrowser });
       setMediaInfo(info);
+      setInspectError(null);
       if (info.isAudioOnly) {
         setMediaType('audio');
       }
       onShowToast(`Loaded metadata for "${info.title}"`, 'info');
     } catch (err) {
-      onShowToast(`Inspection failed: ${err.message}`, 'error');
+      setMediaInfo(null);
+      const msg = err.message || 'Inspection failed.';
+      setInspectError(msg);
+      onShowToast(`Inspection failed: ${msg}`, 'error');
     } finally {
       setIsInspecting(false);
     }
@@ -124,6 +143,7 @@ export default function StudioTab({
         format: videoContainer,
         resolution,
         fastReencode: mediaType === 'video' ? fastReencode : false,
+        noAudio: mediaType === 'video' ? noAudio : false,
         audioFormat,
         audioBitrate,
         embedThumbnail,
@@ -183,7 +203,7 @@ export default function StudioTab({
             className="form-input"
             placeholder="Enter media URL (YouTube, TikTok, Instagram, Spotify, Vimeo, Twitter)..."
             value={url}
-            onChange={(e) => setUrl(e.target.value)}
+            onChange={(e) => handleUrlChange(e.target.value)}
           />
           <button
             className="btn-secondary"
@@ -194,7 +214,16 @@ export default function StudioTab({
           </button>
         </div>
 
-        {url.trim() && !platform.isAllowed && (
+        {inspectError && (
+          <div className="whitelist-blocked-banner warning">
+            <AlertTriangle size={15} color="#d29922" />
+            <div className="blocked-text-col">
+              <strong>Could not inspect link:</strong> {inspectError}
+            </div>
+          </div>
+        )}
+
+        {url.trim() && !platform.isAllowed && !inspectError && (
           <div className="whitelist-blocked-banner">
             <AlertTriangle size={15} color="#f85149" />
             <span>Domain is not in the whitelist. Only verified platforms are supported.</span>
@@ -307,6 +336,37 @@ export default function StudioTab({
                 type="checkbox"
                 checked={fastReencode}
                 onChange={(e) => setFastReencode(e.target.checked)}
+              />
+              <span className="slider round"></span>
+            </label>
+          </div>
+
+          {/* No Audio (Mute Video Track) - User Requested */}
+          <div className="reencode-highlight-card" style={{ marginTop: '10px' }}>
+            <div className="reencode-highlight-left">
+              <div
+                className="reencode-icon-box"
+                style={{
+                  background: noAudio ? 'rgba(239, 68, 68, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                  borderColor: noAudio ? 'rgba(239, 68, 68, 0.35)' : 'rgba(255, 255, 255, 0.08)'
+                }}
+              >
+                <VolumeX size={18} color={noAudio ? '#ef4444' : '#8b949e'} />
+              </div>
+              <div>
+                <div className="reencode-title" style={{ color: noAudio ? '#fca5a5' : '#e6edf3' }}>
+                  No Audio (Mute Video Stream)
+                </div>
+                <div className="reencode-desc">
+                  Downloads only the pure video stream without any audio tracks. Ideal for B-roll, background reels, and video editors.
+                </div>
+              </div>
+            </div>
+            <label className="switch">
+              <input
+                type="checkbox"
+                checked={noAudio}
+                onChange={(e) => setNoAudio(e.target.checked)}
               />
               <span className="slider round"></span>
             </label>
