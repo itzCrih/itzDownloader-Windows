@@ -159,7 +159,13 @@ export default function QueueTab({
 
                   <div className="queue-meta-row">
                     <span className="queue-meta-pill">{job.author || 'Web Media'}</span>
-                    <span className="queue-meta-pill preset">{job.preset}</span>
+                    <span className="queue-meta-pill preset">
+                      {job.preset === 'custom' && job.customOptions?.resolution === 'custom' && job.customOptions?.customResolution
+                        ? `Custom (${job.customOptions.customResolution})`
+                        : job.preset === 'custom' && job.customOptions?.resolution && job.customOptions.resolution !== 'best'
+                        ? `Custom (${job.customOptions.resolution}p)`
+                        : job.preset}
+                    </span>
                     {job.outputSize > 0 && (
                       <span className="queue-meta-pill size">{formatBytes(job.outputSize)}</span>
                     )}
