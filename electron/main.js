@@ -31,6 +31,7 @@ function createSplashWindow() {
     center: true,
     show: false,
     skipTaskbar: true,
+    focusable: false, // Prevents splash from capturing focus or mouse events
     backgroundColor: '#07090e',
     icon: fs.existsSync(iconPath) ? iconPath : fs.existsSync(pngIconPath) ? pngIconPath : undefined,
     webPreferences: {
@@ -51,7 +52,7 @@ function createSplashWindow() {
   });
 }
 
-function createWindow() {
+function createWindow(onReady = null) {
   const iconPath = path.join(__dirname, '../public/icon.ico');
   const pngIconPath = path.join(__dirname, '../public/logo.png');
 
@@ -91,7 +92,9 @@ function createWindow() {
   });
 
   mainWindow.once('ready-to-show', () => {
-    setTimeout(() => {
+    if (onReady) {
+      onReady();
+    } else {
       if (splashWindow && !splashWindow.isDestroyed()) {
         splashWindow.close();
         splashWindow = null;
@@ -100,7 +103,7 @@ function createWindow() {
         mainWindow.show();
         mainWindow.focus();
       }
-    }, 600);
+    }
 
     autoUpdater = new AutoUpdater(mainWindow);
     // Background auto-update check on startup after 4 seconds
@@ -126,6 +129,14 @@ function createWindow() {
   }
 }
 
+// Global Anti-Crash Exception & Rejection Handlers
+process.on('uncaughtException', (err) => {
+  console.error('[itzDownloader Core] Uncaught Exception:', err);
+});
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[itzDownloader Core] Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
 // Ensure single instance lock
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
@@ -139,6 +150,7 @@ if (!gotTheLock) {
   });
 
   app.whenReady().then(async () => {
+    const splashStartTime = Date.now();
     // Show instant splash screen immediately
     createSplashWindow();
 
@@ -146,11 +158,31 @@ if (!gotTheLock) {
     engineManager = new EngineManager(appDataPath);
     downloader = new Downloader(engineManager);
 
-    // Initial detection of yt-dlp & ffmpeg (checks local, system, and itzCut sibling)
-    await engineManager.detect();
+    // Run engine & hardware detection in background while splash is shown
+    const detectPromise = engineManager.detect().catch((err) => {
+      console.error('Engine detection error:', err);
+    });
 
     setupIpcHandlers();
-    createWindow();
+
+    // Create and load main window in parallel immediately (same ultra-fast design as itzCut!)
+    createWindow(async () => {
+      await detectPromise;
+      const elapsed = Date.now() - splashStartTime;
+      const minSplashDuration = 1800; // Exact same 1.8s polished branding as itzCut Desktop
+      const remainingDelay = Math.max(0, minSplashDuration - elapsed);
+
+      setTimeout(() => {
+        if (splashWindow && !splashWindow.isDestroyed()) {
+          splashWindow.close();
+          splashWindow = null;
+        }
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.show();
+          mainWindow.focus();
+        }
+      }, remainingDelay);
+    });
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -234,8 +266,8 @@ function setupIpcHandlers() {
   });
 
   // Engine Manager IPC
-  ipcMain.handle('engine:getStatus', async () => {
-    return await engineManager.detect();
+  ipcMain.handle('engine:getStatus', async (event, force) => {
+    return await engineManager.detect(force || false);
   });
 
   ipcMain.handle('engine:downloadYtDlp', async () => {

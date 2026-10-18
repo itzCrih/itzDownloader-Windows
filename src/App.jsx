@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { DownloadCloud, ShieldCheck, Lock } from 'lucide-react';
+import { DownloadCloud, ShieldCheck, Lock, Sparkles } from 'lucide-react';
 import TitleBar from './components/TitleBar';
 import Navbar from './components/Navbar';
 import ToastContainer from './components/ToastContainer';
@@ -55,8 +55,8 @@ export default function App() {
 
   const [updateState, setUpdateState] = useState({
     status: 'idle',
-    currentVersion: '1.2.2',
-    latestVersion: '1.2.2',
+    currentVersion: '1.2.3',
+    latestVersion: '1.2.3',
     downloadPercent: 0,
     error: null,
   });
@@ -165,9 +165,19 @@ export default function App() {
       }));
     });
 
+    const unsubUpdateProgress = window.itzDownloaderAPI.onUpdateDownloadProgress
+      ? window.itzDownloaderAPI.onUpdateDownloadProgress((data) => {
+          setUpdateState((prev) => ({
+            ...prev,
+            status: 'downloading',
+            downloadPercent: Math.round(data.percent || 0),
+          }));
+        })
+      : null;
+
     const unsubUpdateDownloaded = window.itzDownloaderAPI.onUpdateDownloaded(() => {
       setUpdateState((prev) => ({ ...prev, status: 'downloaded' }));
-      showToast('Update ready to install! Check Settings.', 'info');
+      showToast('Update downloaded and verified! Check Settings to restart.', 'info');
     });
 
     return () => {
@@ -179,6 +189,7 @@ export default function App() {
       if (unsubEngineDownload) unsubEngineDownload();
       if (unsubEngineInstall) unsubEngineInstall();
       if (unsubUpdateStatus) unsubUpdateStatus();
+      if (unsubUpdateProgress) unsubUpdateProgress();
       if (unsubUpdateDownloaded) unsubUpdateDownloaded();
     };
   }, [soundEnabled]);
@@ -239,9 +250,9 @@ export default function App() {
   const handleRefreshEngines = async () => {
     if (window.itzDownloaderAPI) {
       try {
-        const s = await window.itzDownloaderAPI.ensureAllEngines();
+        const s = await window.itzDownloaderAPI.getEngineStatus(true);
         setEngineStatus(s);
-        showToast('Engine status refreshed.', 'info');
+        showToast('Engine and hardware status re-probed and refreshed.', 'info');
       } catch (e) {
         const fallback = await window.itzDownloaderAPI.getEngineStatus();
         setEngineStatus(fallback);
@@ -314,6 +325,41 @@ export default function App() {
 
   const activeJobsCount = jobs.filter((j) => j.status === 'downloading' || j.status === 'converting').length;
   const currentRunningJob = jobs.find((j) => j.status === 'downloading' || j.status === 'converting');
+
+  const isUpdateDownloading = updateState.status === 'downloading' || updateState.status === 'installing';
+  const isEngineInstalling = !!engineInstallingState?.isInstalling;
+  const isLocked = isEngineInstalling || isUpdateDownloading;
+
+  // Anti-crash: completely lock all user keyboard, mouse, and scroll events during sensitive downloads
+  useEffect(() => {
+    if (!isLocked) return;
+
+    const blockEvent = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      return false;
+    };
+
+    window.addEventListener('keydown', blockEvent, true);
+    window.addEventListener('keyup', blockEvent, true);
+    window.addEventListener('keypress', blockEvent, true);
+    window.addEventListener('mousedown', blockEvent, true);
+    window.addEventListener('mouseup', blockEvent, true);
+    window.addEventListener('click', blockEvent, true);
+    window.addEventListener('contextmenu', blockEvent, true);
+    window.addEventListener('wheel', blockEvent, { passive: false, capture: true });
+
+    return () => {
+      window.removeEventListener('keydown', blockEvent, true);
+      window.removeEventListener('keyup', blockEvent, true);
+      window.removeEventListener('keypress', blockEvent, true);
+      window.removeEventListener('mousedown', blockEvent, true);
+      window.removeEventListener('mouseup', blockEvent, true);
+      window.removeEventListener('click', blockEvent, true);
+      window.removeEventListener('contextmenu', blockEvent, true);
+      window.removeEventListener('wheel', blockEvent, { capture: true });
+    };
+  }, [isLocked]);
 
   return (
     <div className="app-container">
@@ -429,48 +475,69 @@ export default function App() {
           </div>
 
           <div>
-            <span style={{ fontFamily: 'var(--font-mono)' }}>itzDownloader Desktop v1.2.2</span>
+            <span style={{ fontFamily: 'var(--font-mono)' }}>itzDownloader Desktop v1.2.3</span>
           </div>
         </footer>
       </div>
 
-      {/* Full-Screen Blocking Modal Overlay during Engine Setup to Prevent Crashes */}
-      {engineInstallingState?.isInstalling && (
-        <div className="engine-blocking-overlay" role="dialog" aria-modal="true">
+      {/* Full-Screen Blocking Modal Overlay during Engine Setup or Update Downloads to Prevent Crashes */}
+      {isLocked && (
+        <div
+          className="engine-blocking-overlay"
+          role="dialog"
+          aria-modal="true"
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
+        >
           <div className="engine-blocking-modal">
             <div className="engine-blocking-glow"></div>
             <div className="engine-blocking-logo">
-              <DownloadCloud size={40} className="engine-blocking-icon spin-pulse" />
+              {isUpdateDownloading ? (
+                <Sparkles size={38} className="engine-blocking-icon spin-pulse" />
+              ) : (
+                <DownloadCloud size={40} className="engine-blocking-icon spin-pulse" />
+              )}
             </div>
 
             <div className="engine-blocking-badge">
               <ShieldCheck size={13} />
-              <span>Core Engine Setup</span>
+              <span>{isUpdateDownloading ? 'Application Update' : 'Core Engine Setup'}</span>
             </div>
 
             <h2 className="engine-blocking-title">
-              {engineInstallingState.title || 'Configuring Media Engines'}
+              {isUpdateDownloading
+                ? (updateState.status === 'installing' ? 'Applying Update...' : `Downloading Update v${updateState.latestVersion || ''}...`)
+                : (engineInstallingState?.title || 'Configuring Media Engines')}
             </h2>
             <p className="engine-blocking-desc">
-              {engineInstallingState.detail || 'Preparing yt-dlp & FFmpeg binaries. Clicks are safely locked to prevent app crashes.'}
+              {isUpdateDownloading
+                ? 'Please wait while update packages are being safely processed. All interactions are locked to prevent app corruption.'
+                : (engineInstallingState?.detail || 'Preparing yt-dlp & FFmpeg binaries. Clicks are safely locked to prevent app crashes.')}
             </p>
 
             <div className="engine-blocking-progress-wrap">
               <div className="engine-blocking-track">
                 <div
                   className="engine-blocking-fill"
-                  style={{ width: `${Math.max(8, Math.min(100, engineInstallingState.percent || 15))}%` }}
+                  style={{
+                    width: `${Math.max(8, Math.min(100, isUpdateDownloading ? (updateState.downloadPercent || 15) : (engineInstallingState?.percent || 15)))}%`,
+                  }}
                 />
               </div>
               <div className="engine-blocking-stats">
-                <span>{engineInstallingState.percent || 15}%</span>
-                <span>{engineInstallingState.engine ? `Engine: ${engineInstallingState.engine.toUpperCase()}` : 'Verifying local dependencies'}</span>
+                <span>{isUpdateDownloading ? `${updateState.downloadPercent || 0}%` : `${engineInstallingState?.percent || 15}%`}</span>
+                <span>
+                  {isUpdateDownloading
+                    ? (updateState.status === 'installing' ? 'Finalizing Setup...' : 'Downloading Assets')
+                    : (engineInstallingState?.engine ? `Engine: ${engineInstallingState.engine.toUpperCase()}` : 'Verifying local dependencies')}
+                </span>
               </div>
             </div>
 
             <div className="engine-blocking-lock-banner">
               <Lock size={12} />
-              <span>User interactions temporarily locked until installation finishes</span>
+              <span>User interactions temporarily locked until process completes</span>
             </div>
           </div>
         </div>

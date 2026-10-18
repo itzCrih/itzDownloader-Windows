@@ -10,7 +10,9 @@
       box-sizing: border-box;
       user-select: none;
       -webkit-user-select: none;
-      -webkit-app-region: drag;
+      -webkit-user-drag: none;
+      pointer-events: none !important;
+      cursor: default !important;
     }
     html, body {
       width: 100%;
@@ -21,6 +23,7 @@
       color: #e6edf3;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       overflow: hidden;
+      pointer-events: none !important;
     }
     body {
       display: flex;
@@ -158,5 +161,18 @@
   <div class="progress-track">
     <div class="progress-bar"></div>
   </div>
+
+  <script>
+    // Completely disable any user interaction or input on splash screen to prevent crashes
+    window.addEventListener('contextmenu', (e) => e.preventDefault(), true);
+    window.addEventListener('mousedown', (e) => e.preventDefault(), true);
+    window.addEventListener('mouseup', (e) => e.preventDefault(), true);
+    window.addEventListener('click', (e) => e.preventDefault(), true);
+    window.addEventListener('dblclick', (e) => e.preventDefault(), true);
+    window.addEventListener('keydown', (e) => e.preventDefault(), true);
+    window.addEventListener('keyup', (e) => e.preventDefault(), true);
+    window.addEventListener('dragstart', (e) => e.preventDefault(), true);
+    window.addEventListener('selectstart', (e) => e.preventDefault(), true);
+  </script>
 </body>
 </html>
