@@ -38,8 +38,8 @@ export default function StudioTab({
 
   // Advanced Configurations
   const [mediaType, setMediaType] = useState('video'); // 'video' | 'audio'
-  const [videoContainer, setVideoContainer] = useState('mp4'); // 'mp4' | 'mkv' | 'webm'
-  const [resolution, setResolution] = useState('best'); // 'best' | '2160' | '1440' | '1080' | '720' | '480'
+  const [resolution, setResolution] = useState('best'); // 'best' | '2160' | '1440' | '1080' | '720' | '480' | 'custom'
+  const [customResolution, setCustomResolution] = useState('1920x1080'); // User requested: Custom resolution text input
   const [fastReencode, setFastReencode] = useState(false); // User requested: Fast Re-encoding in MP4
   const [noAudio, setNoAudio] = useState(false); // User requested: No Audio (Mute Video Stream)
   const [audioFormat, setAudioFormat] = useState('mp3'); // 'mp3' | 'flac' | 'wav' | 'aac' | 'opus' | 'ogg'
@@ -142,6 +142,7 @@ export default function StudioTab({
         mediaType,
         format: videoContainer,
         resolution,
+        customResolution: resolution === 'custom' ? (customResolution.trim() || '1920x1080') : null,
         fastReencode: mediaType === 'video' ? fastReencode : false,
         noAudio: mediaType === 'video' ? noAudio : false,
         audioFormat,
@@ -311,10 +312,85 @@ export default function StudioTab({
                 <option value="1080">Full HD (1080p 60fps)</option>
                 <option value="720">HD (720p)</option>
                 <option value="480">Standard SD (480p)</option>
+                <option value="custom">Custom Resolution (Text Input)...</option>
               </select>
-              <span className="form-hint">Cap the resolution to save disk space or download at maximum native source.</span>
+              <span className="form-hint">Cap the resolution to save disk space, set custom dimensions, or download source master.</span>
             </div>
           </div>
+
+          {/* Custom Resolution Input Box (User Requested) */}
+          {resolution === 'custom' && (
+            <div className="custom-resolution-card animate-fadeIn">
+              <div className="custom-res-header">
+                <div className="custom-res-title-group">
+                  <Sliders size={14} color="#e6b422" />
+                  <span className="custom-res-label">Custom Resolution Specification</span>
+                </div>
+                <span className="custom-res-badge">Custom Dimensions</span>
+              </div>
+
+              <div className="custom-res-input-row">
+                <input
+                  type="text"
+                  className="form-input custom-res-input"
+                  placeholder="e.g. 1920x1080, 1080x1920, 2560x1440, 1080p, 720"
+                  value={customResolution}
+                  onChange={(e) => setCustomResolution(e.target.value)}
+                  autoFocus
+                />
+              </div>
+
+              <div className="custom-res-chips-row">
+                <span className="custom-chips-label">Presets:</span>
+                <button
+                  type="button"
+                  className={`custom-chip-btn ${customResolution === '1920x1080' ? 'active' : ''}`}
+                  onClick={() => setCustomResolution('1920x1080')}
+                >
+                  1920×1080 (16:9)
+                </button>
+                <button
+                  type="button"
+                  className={`custom-chip-btn ${customResolution === '1080x1920' ? 'active' : ''}`}
+                  onClick={() => setCustomResolution('1080x1920')}
+                >
+                  1080×1920 (9:16 Shorts/TikTok)
+                </button>
+                <button
+                  type="button"
+                  className={`custom-chip-btn ${customResolution === '2560x1440' ? 'active' : ''}`}
+                  onClick={() => setCustomResolution('2560x1440')}
+                >
+                  2560×1440 (2K)
+                </button>
+                <button
+                  type="button"
+                  className={`custom-chip-btn ${customResolution === '3840x2160' ? 'active' : ''}`}
+                  onClick={() => setCustomResolution('3840x2160')}
+                >
+                  3840×2160 (4K)
+                </button>
+                <button
+                  type="button"
+                  className={`custom-chip-btn ${customResolution === '1280x720' ? 'active' : ''}`}
+                  onClick={() => setCustomResolution('1280x720')}
+                >
+                  1280×720 (720p)
+                </button>
+                <button
+                  type="button"
+                  className={`custom-chip-btn ${customResolution === '1080x1080' ? 'active' : ''}`}
+                  onClick={() => setCustomResolution('1080x1080')}
+                >
+                  1080×1080 (1:1)
+                </button>
+              </div>
+
+              <span className="form-hint" style={{ marginTop: '3px' }}>
+                Enter custom dimensions as width×height (e.g. <code>1920x1080</code>, <code>1080x1920</code>) or vertical height (e.g. <code>1080p</code>, <code>720</code>).
+              </span>
+            </div>
+          )}
 
           {/* Fast Re-encoding Option (User Requested!) */}
           <div className="reencode-highlight-card">

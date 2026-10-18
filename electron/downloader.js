@@ -483,6 +483,51 @@ class Downloader {
     return 'generic';
   }
 
+  _buildVideoFormatSelector(resolution, customResolution, format = 'mp4', noAudio = false) {
+    let filter = '';
+
+    if (resolution === 'custom' && customResolution) {
+      const cleanRes = customResolution.trim().toLowerCase();
+      const whMatch = cleanRes.match(/^(\d+)\s*[xX*×]\s*(\d+)$/);
+      if (whMatch) {
+        const w = parseInt(whMatch[1], 10);
+        const h = parseInt(whMatch[2], 10);
+        filter = `[width<=${w}][height<=${h}]`;
+      } else if (cleanRes === '4k') {
+        filter = '[height<=2160]';
+      } else if (cleanRes === '2k') {
+        filter = '[height<=1440]';
+      } else if (cleanRes === '8k') {
+        filter = '[height<=4320]';
+      } else {
+        const hMatch = cleanRes.match(/^(\d+)\s*p?$/);
+        if (hMatch) {
+          const h = parseInt(hMatch[1], 10);
+          filter = `[height<=${h}]`;
+        } else if (cleanRes.includes('<') || cleanRes.includes('>') || cleanRes.includes('=')) {
+          filter = `[${cleanRes}]`;
+        }
+      }
+    } else if (resolution && resolution !== 'best' && resolution !== 'custom') {
+      const h = parseInt(resolution, 10);
+      if (h > 0) {
+        filter = `[height<=${h}]`;
+      }
+    }
+
+    if (noAudio) {
+      if (filter) {
+        return `bv*${filter}[ext=${format}] / bv*${filter} / bv*[ext=${format}] / bv*`;
+      }
+      return `bv*[ext=${format}] / bv*`;
+    } else {
+      if (filter) {
+        return `bv*${filter}+ba / b${filter} / bv*+ba/b`;
+      }
+      return null;
+    }
+  }
+
   /**
    * Start a download job with real-time streaming progress
    */
@@ -508,6 +553,7 @@ class Downloader {
       mediaType = 'video',
       format = 'mp4',
       resolution = 'best',
+      customResolution = '',
       fastReencode = false,
       noAudio = false,
       audioFormat = 'mp3',
@@ -551,6 +597,7 @@ class Downloader {
             tikTokInfo.title,
             fastReencode,
             noAudio,
+            customResolution,
             onProgress,
             onLog
           );
@@ -647,27 +694,15 @@ class Downloader {
         }
         if (embedThumbnail) args.push('--embed-thumbnail');
       } else {
-        // Video mode: handle No Audio option
+        // Video mode: handle Custom / Preset resolution & No Audio option
+        const customRes = (customResolution || '').trim();
+        const videoFormatSelector = this._buildVideoFormatSelector(resolution, customRes, format, noAudio);
+        if (videoFormatSelector) {
+          args.push('-f', videoFormatSelector);
+        }
         if (noAudio) {
-          if (resolution !== 'best') {
-            const h = parseInt(resolution, 10);
-            if (h > 0) {
-              args.push('-f', `bv*[height<=${h}][ext=${format}]/bv*[height<=${h}]/bv*`);
-            } else {
-              args.push('-f', `bv*[ext=${format}]/bv*`);
-            }
-          } else {
-            args.push('-f', `bv*[ext=${format}]/bv*`);
-          }
           // Stripping audio with ffmpeg postprocessor
           args.push('--postprocessor-args', 'ffmpeg:-an');
-        } else {
-          if (resolution !== 'best') {
-            const h = parseInt(resolution, 10);
-            if (h > 0) {
-              args.push('-f', `bv*[height<=${h}]+ba/b[height<=${h}] / bv*+ba/b`);
-            }
-          }
         }
 
         if (fastReencode) {
@@ -859,7 +894,7 @@ class Downloader {
   /**
    * Direct high-speed download for TikTok video streams (bypasses login wall, zero watermark)
    */
-  async _downloadDirectTikTokVideo(videoUrl, outputDir, jobConfig, title, fastReencode, noAudio, onProgress, onLog) {
+  async _downloadDirectTikTokVideo(videoUrl, outputDir, jobConfig, title, fastReencode, noAudio, customResolution = '', onProgress, onLog) {
     const { jobId } = jobConfig;
     const safeTitle = (title || 'TikTok_Video').replace(/[\\/:*?"<>|]/g, '_').slice(0, 90).trim();
     const finalPath = path.join(outputDir, `${safeTitle}.mp4`);
@@ -909,6 +944,17 @@ class Downloader {
         '-preset', 'fast',
         '-progress', 'pipe:1',
       ];
+      if (customResolution) {
+        const whMatch = customResolution.match(/^(\d+)\s*[xX*×]\s*(\d+)$/);
+        if (whMatch) {
+          ffmpegArgs.push('-vf', `scale=${whMatch[1]}:${whMatch[2]}:force_original_aspect_ratio=decrease,pad=${whMatch[1]}:${whMatch[2]}:(ow-iw)/2:(oh-ih)/2`);
+        } else {
+          const hMatch = customResolution.match(/^(\d+)\s*p?$/);
+          if (hMatch) {
+            ffmpegArgs.push('-vf', `scale=-2:${hMatch[1]}`);
+          }
+        }
+      }
       if (noAudio) {
         ffmpegArgs.push('-an');
       } else {
