@@ -8,7 +8,7 @@
 The high-performance, private Windows workstation for instant video & audio downloads from YouTube, TikTok, Spotify, Instagram, and over 1,000+ online media platforms.
 
 [![Platform](https://img.shields.io/badge/Platform-Windows_10_%7C_11_(x64)-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/itzCrih/itzDownloader-Windows/releases/latest)
-[![Version](https://img.shields.io/badge/Version-v1.2.2-e6b422?style=for-the-badge)](https://github.com/itzCrih/itzDownloader-Windows/releases/latest)
+[![Version](https://img.shields.io/badge/Version-v1.2.3-e6b422?style=for-the-badge)](https://github.com/itzCrih/itzDownloader-Windows/releases/latest)
 [![Engine](https://img.shields.io/badge/yt--dlp-Native_v2025+-black?style=for-the-badge)](https://github.com/yt-dlp/yt-dlp)
 [![FFmpeg](https://img.shields.io/badge/FFmpeg-v7.1_Native-black?style=for-the-badge)](https://ffmpeg.org)
 [![Signed](https://img.shields.io/badge/Code_Signing-Authenticode_Signed-2ea043?style=for-the-badge&logo=shield&logoColor=white)](certs/)
@@ -16,19 +16,30 @@ The high-performance, private Windows workstation for instant video & audio down
 
 <br />
 
-### Download itzDownloader Desktop (v1.2.2)
+### Download itzDownloader Desktop (v1.2.3)
 
-[![Download Setup](https://img.shields.io/badge/Download_Installer-itzDownloader_Desktop_Setup_(v1.2.2)-e6b422?style=for-the-badge&logo=windows&logoColor=black)](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.2.2/itzDownloader-Desktop-Setup-1.2.2.exe)  
-[![Download Portable](https://img.shields.io/badge/Download_Portable-itzDownloader_Desktop_Portable_(v1.2.2)-ffffff?style=for-the-badge&logo=windows&logoColor=black)](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.2.2/itzDownloader-Desktop-1.2.2-Portable.exe)
+[![Download Setup](https://img.shields.io/badge/Download_Installer-itzDownloader_Desktop_Setup_(v1.2.3)-e6b422?style=for-the-badge&logo=windows&logoColor=black)](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.2.3/itzDownloader-Desktop-Setup-1.2.3.exe)  
+[![Download Portable](https://img.shields.io/badge/Download_Portable-itzDownloader_Desktop_Portable_(v1.2.3)-ffffff?style=for-the-badge&logo=windows&logoColor=black)](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.2.3/itzDownloader-Desktop-1.2.3-Portable.exe)
 
 | Package | Format | Architecture | Direct Link |
 | :--- | :--- | :--- | :--- |
-| **Windows Installer** | NSIS Setup `.exe` | Windows 10 / 11 (x64) | [itzDownloader-Desktop-Setup-1.2.2.exe](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.2.2/itzDownloader-Desktop-Setup-1.2.2.exe) |
-| **Standalone Portable** | Portable `.exe` | Windows 10 / 11 (x64) | [itzDownloader-Desktop-1.2.2-Portable.exe](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.2.2/itzDownloader-Desktop-1.2.2-Portable.exe) |
+| **Windows Installer** | NSIS Setup `.exe` | Windows 10 / 11 (x64) | [itzDownloader-Desktop-Setup-1.2.3.exe](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.2.3/itzDownloader-Desktop-Setup-1.2.3.exe) |
+| **Standalone Portable** | Portable `.exe` | Windows 10 / 11 (x64) | [itzDownloader-Desktop-1.2.3-Portable.exe](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.2.3/itzDownloader-Desktop-1.2.3-Portable.exe) |
 
 *Authenticode code signed with DigiCert RFC 3161 timestamps. Built-in Auto-Updater checks for future releases seamlessly on startup.*
 
 </div>
+
+---
+
+## What's New in v1.2.3
+
+- 🚀 **Blazing-Fast Startup Speed (Reduced from 6s to 2-3s):** Re-engineered the initialization lifecycle to mirror `itzCut Desktop`. Chromium browser and Vite bundle are now launched concurrently with background engine detection, eliminating the 3-second serial block.
+- ⚡ **Persistent Hardware & GPU Cache:** GPU specifications (e.g. RTX 3050 Laptop), CPU specs, and hardware acceleration encoder support (`NVENC`, `QSV`, `AMF`) are cached in `hardware-cache.json`, achieving sub-millisecond instant engine verification on startup.
+- 🔒 **Comprehensive Anti-Crash Click Locks:**
+  - Initial splash window is completely click-proof and non-interactive (`pointer-events: none !important`, `focusable: false`) to prevent DWM drag/close race conditions and access violations.
+  - Active operations (core engine installation of yt-dlp/ffmpeg, and application updates downloading/installing) lock all user interactions with a modal overlay and global event capture, safeguarding binary writing and preventing app crashes.
+- 🛡️ **Authenticode Digitally Signed Release:** Both the NSIS Setup installer and standalone Portable executables are fully signed with RFC 3161 timestamping.
 
 ---
 

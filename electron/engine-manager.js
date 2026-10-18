@@ -10,6 +10,7 @@ class EngineManager {
   constructor(appDataPath) {
     this.appDataPath = appDataPath;
     this.binDir = path.join(appDataPath, 'bin');
+    this.cacheFile = path.join(appDataPath, 'hardware-cache.json');
     this.ytDlpPath = null;
     this.ffmpegPath = null;
     this.ffprobePath = null;
@@ -36,6 +37,21 @@ class EngineManager {
         primaryGpu: '',
       },
     };
+  }
+
+  _readCache() {
+    try {
+      if (fs.existsSync(this.cacheFile)) {
+        return JSON.parse(fs.readFileSync(this.cacheFile, 'utf8'));
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  _writeCache(data) {
+    try {
+      fs.writeFileSync(this.cacheFile, JSON.stringify(data, null, 2), 'utf8');
+    } catch (e) {}
   }
 
   ensureBinDir() {
@@ -100,32 +116,37 @@ class EngineManager {
   }
 
   /**
-   * Detect installed binaries (yt-dlp, ffmpeg, ffprobe) in local bin, system PATH / WinGet, or sibling itzCut
+   * Detect installed binaries (yt-dlp, ffmpeg, ffprobe) with persistent hardware cache for instant sub-millisecond startup
    */
-  async detect() {
+  async detect(forceRefresh = false) {
     this.ensureBinDir();
+    const cache = !forceRefresh ? this._readCache() : null;
 
     // 1. Detect yt-dlp
     const localYtDlp = path.join(this.binDir, process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp');
+    let ytDlpMtime = 0;
+
     if (fs.existsSync(localYtDlp)) {
       this.ytDlpPath = localYtDlp;
       this.status.ytDlpSource = 'local';
+      try { ytDlpMtime = fs.statSync(localYtDlp).mtimeMs; } catch (e) {}
     } else {
-      const systemYtDlp = this._findInPath('yt-dlp');
-      if (systemYtDlp) {
-        this.ytDlpPath = systemYtDlp;
-        this.status.ytDlpSource = 'system';
+      const siblingYtDlp = this._findSiblingYtDlp();
+      if (siblingYtDlp) {
+        try {
+          fs.copyFileSync(siblingYtDlp, localYtDlp);
+          this.ytDlpPath = localYtDlp;
+          this.status.ytDlpSource = 'itzCut (reused)';
+          try { ytDlpMtime = fs.statSync(localYtDlp).mtimeMs; } catch (e) {}
+        } catch (e) {
+          this.ytDlpPath = siblingYtDlp;
+          this.status.ytDlpSource = 'itzCut (linked)';
+        }
       } else {
-        const siblingYtDlp = this._findSiblingYtDlp();
-        if (siblingYtDlp) {
-          try {
-            fs.copyFileSync(siblingYtDlp, localYtDlp);
-            this.ytDlpPath = localYtDlp;
-            this.status.ytDlpSource = 'itzCut (reused)';
-          } catch (e) {
-            this.ytDlpPath = siblingYtDlp;
-            this.status.ytDlpSource = 'itzCut (linked)';
-          }
+        const systemYtDlp = this._findInPath('yt-dlp');
+        if (systemYtDlp) {
+          this.ytDlpPath = systemYtDlp;
+          this.status.ytDlpSource = 'system';
         } else {
           this.ytDlpPath = null;
           this.status.ytDlpSource = null;
@@ -134,16 +155,21 @@ class EngineManager {
     }
 
     if (this.ytDlpPath) {
-      try {
-        const out = execSync(`"${this.ytDlpPath}" --version`, {
-          encoding: 'utf8',
-          timeout: 4000,
-          windowsHide: true,
-        }).trim();
-        this.status.ytDlpVersion = out.split(/\r?\n/)[0];
+      if (cache?.ytDlp?.version && (ytDlpMtime === 0 || cache.ytDlp.mtime === ytDlpMtime)) {
+        this.status.ytDlpVersion = cache.ytDlp.version;
         this.status.ytDlpAvailable = true;
-      } catch (e) {
-        this.status.ytDlpAvailable = false;
+      } else {
+        try {
+          const out = execSync(`"${this.ytDlpPath}" --version`, {
+            encoding: 'utf8',
+            timeout: 3000,
+            windowsHide: true,
+          }).trim();
+          this.status.ytDlpVersion = out.split(/\r?\n/)[0];
+          this.status.ytDlpAvailable = true;
+        } catch (e) {
+          this.status.ytDlpAvailable = false;
+        }
       }
     } else {
       this.status.ytDlpAvailable = false;
@@ -153,34 +179,37 @@ class EngineManager {
     // 2. Detect ffmpeg & ffprobe
     const localFfmpeg = path.join(this.binDir, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
     const localFfprobe = path.join(this.binDir, process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe');
+    let ffmpegMtime = 0;
 
     if (fs.existsSync(localFfmpeg) && fs.existsSync(localFfprobe)) {
       this.ffmpegPath = localFfmpeg;
       this.ffprobePath = localFfprobe;
       this.status.ffmpegSource = 'local';
+      try { ffmpegMtime = fs.statSync(localFfmpeg).mtimeMs; } catch (e) {}
     } else {
-      const systemFfmpeg = this._findInPath('ffmpeg');
-      const systemFfprobe = this._findInPath('ffprobe');
-      if (systemFfmpeg) {
-        this.ffmpegPath = systemFfmpeg;
-        this.ffprobePath = systemFfprobe || systemFfmpeg;
-        this.status.ffmpegSource = 'system';
-      } else {
-        const sibling = this._findSiblingFfmpeg();
-        if (sibling) {
-          try {
-            fs.copyFileSync(sibling.ffmpegPath, localFfmpeg);
-            if (sibling.ffprobePath && fs.existsSync(sibling.ffprobePath)) {
-              fs.copyFileSync(sibling.ffprobePath, localFfprobe);
-            }
-            this.ffmpegPath = localFfmpeg;
-            this.ffprobePath = localFfprobe;
-            this.status.ffmpegSource = 'itzCut (reused)';
-          } catch (e) {
-            this.ffmpegPath = sibling.ffmpegPath;
-            this.ffprobePath = sibling.ffprobePath;
-            this.status.ffmpegSource = 'itzCut (linked)';
+      const sibling = this._findSiblingFfmpeg();
+      if (sibling) {
+        try {
+          fs.copyFileSync(sibling.ffmpegPath, localFfmpeg);
+          if (sibling.ffprobePath && fs.existsSync(sibling.ffprobePath)) {
+            fs.copyFileSync(sibling.ffprobePath, localFfprobe);
           }
+          this.ffmpegPath = localFfmpeg;
+          this.ffprobePath = localFfprobe;
+          this.status.ffmpegSource = 'itzCut (reused)';
+          try { ffmpegMtime = fs.statSync(localFfmpeg).mtimeMs; } catch (e) {}
+        } catch (e) {
+          this.ffmpegPath = sibling.ffmpegPath;
+          this.ffprobePath = sibling.ffprobePath;
+          this.status.ffmpegSource = 'itzCut (linked)';
+        }
+      } else {
+        const systemFfmpeg = this._findInPath('ffmpeg');
+        const systemFfprobe = this._findInPath('ffprobe');
+        if (systemFfmpeg) {
+          this.ffmpegPath = systemFfmpeg;
+          this.ffprobePath = systemFfprobe || systemFfmpeg;
+          this.status.ffmpegSource = 'system';
         } else {
           this.ffmpegPath = null;
           this.ffprobePath = null;
@@ -190,31 +219,53 @@ class EngineManager {
     }
 
     if (this.ffmpegPath) {
-      try {
-        const versionOutput = execSync(`"${this.ffmpegPath}" -version`, {
-          encoding: 'utf8',
-          timeout: 4000,
-          windowsHide: true,
-        });
-        const match = versionOutput.match(/ffmpeg version ([^\s]+)/i);
-        this.status.ffmpegVersion = match ? match[1] : 'Detected';
+      if (cache?.ffmpeg?.version && (ffmpegMtime === 0 || cache.ffmpeg.mtime === ffmpegMtime)) {
+        this.status.ffmpegVersion = cache.ffmpeg.version;
         this.status.ffmpegAvailable = true;
+      } else {
+        try {
+          const versionOutput = execSync(`"${this.ffmpegPath}" -version`, {
+            encoding: 'utf8',
+            timeout: 3000,
+            windowsHide: true,
+          });
+          const match = versionOutput.match(/ffmpeg version ([^\s]+)/i);
+          this.status.ffmpegVersion = match ? match[1] : 'Detected';
+          this.status.ffmpegAvailable = true;
+        } catch (e) {
+          this.status.ffmpegAvailable = false;
+        }
+      }
 
-        // Hardware Acceleration probes
+      // Hardware Acceleration probes (cached for ultra-fast startup)
+      if (cache?.hardwareAccels) {
+        this.status.hardwareAccels = { ...cache.hardwareAccels };
+      } else {
         try {
           this.status.hardwareAccels.nvenc = this.testHardwareEncoder('h264_nvenc');
           this.status.hardwareAccels.qsv = this.testHardwareEncoder('h264_qsv');
           this.status.hardwareAccels.amf = this.testHardwareEncoder('h264_amf');
         } catch (e) {}
+      }
 
+      // System info (CPU, RAM, GPU)
+      if (cache?.systemInfo?.primaryGpu) {
+        this.status.systemInfo = { ...cache.systemInfo };
+      } else {
         this.detectSystemInfo();
-      } catch (e) {
-        this.status.ffmpegAvailable = false;
       }
     } else {
       this.status.ffmpegAvailable = false;
       this.status.ffmpegVersion = null;
     }
+
+    // Persist cache for sub-millisecond future launches
+    this._writeCache({
+      ytDlp: { mtime: ytDlpMtime, version: this.status.ytDlpVersion },
+      ffmpeg: { mtime: ffmpegMtime, version: this.status.ffmpegVersion },
+      hardwareAccels: this.status.hardwareAccels,
+      systemInfo: this.status.systemInfo,
+    });
 
     return {
       ...this.status,
@@ -266,10 +317,9 @@ class EngineManager {
   testHardwareEncoder(encoderName) {
     if (!this.ffmpegPath) return false;
     try {
-      execSync(
-        `"${this.ffmpegPath}" -f lavfi -i color=c=black:s=256x256:d=0.1 -c:v ${encoderName} -f null -`,
-        { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 3500, windowsHide: true }
-      );
+      const nullDevice = process.platform === 'win32' ? 'NUL' : '/dev/null';
+      const cmd = `"${this.ffmpegPath}" -y -f lavfi -i testsrc=size=256x256:rate=1 -c:v ${encoderName} -frames:v 1 -f null ${nullDevice}`;
+      execSync(cmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 2500, windowsHide: true });
       return true;
     } catch (e) {
       return false;
@@ -477,10 +527,20 @@ class EngineManager {
    * Automatically verifies and installs all required engines (yt-dlp + ffmpeg)
    */
   async ensureAllEngines(onProgress) {
-    await this.detect();
+    if (!this.status.ytDlpAvailable || !this.status.ffmpegAvailable) {
+      await this.detect();
+    }
+
+    // Fast-path: if both engines are already detected and ready, return immediately (0ms)
+    if (this.status.ytDlpAvailable && this.status.ffmpegAvailable) {
+      return this.status;
+    }
+
+    let neededDownload = false;
 
     // 1. Ensure yt-dlp
     if (!this.status.ytDlpAvailable) {
+      neededDownload = true;
       if (onProgress) {
         onProgress({
           isInstalling: true,
@@ -505,6 +565,7 @@ class EngineManager {
 
     // 2. Ensure FFmpeg
     if (!this.status.ffmpegAvailable) {
+      neededDownload = true;
       if (onProgress) {
         onProgress({
           isInstalling: true,
@@ -527,8 +588,8 @@ class EngineManager {
       });
     }
 
-    const finalStatus = await this.detect();
-    if (onProgress) {
+    const finalStatus = neededDownload ? await this.detect(true) : this.status;
+    if (neededDownload && onProgress) {
       onProgress({
         isInstalling: false,
         engine: 'all',

@@ -34,7 +34,7 @@ contextBridge.exposeInMainWorld('itzDownloaderAPI', {
   },
 
   // Engine Status & Auto-Downloads (yt-dlp + FFmpeg)
-  getEngineStatus: () => ipcRenderer.invoke('engine:getStatus'),
+  getEngineStatus: (force = false) => ipcRenderer.invoke('engine:getStatus', force),
   downloadYtDlp: () => ipcRenderer.invoke('engine:downloadYtDlp'),
   updateYtDlp: () => ipcRenderer.invoke('engine:updateYtDlp'),
   downloadFfmpeg: () => ipcRenderer.invoke('engine:downloadFfmpeg'),

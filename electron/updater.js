@@ -155,6 +155,7 @@ class AutoUpdater {
   async downloadUpdate(downloadUrl) {
     if (this.isDownloading) return;
     this.isDownloading = true;
+    this.send('update:status', { status: 'downloading', updateInfo: this.updateInfo });
 
     const tempDir = os.tmpdir();
     const fileName = `itzDownloader-Update-${this.updateInfo.version}.exe`;
@@ -235,6 +236,7 @@ class AutoUpdater {
     }
 
     try {
+      this.send('update:status', { status: 'installing' });
       spawn(this.downloadedFilePath, ['/S'], {
         detached: true,
         stdio: 'ignore',
