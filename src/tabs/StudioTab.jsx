@@ -38,6 +38,7 @@ export default function StudioTab({
 
   // Advanced Configurations
   const [mediaType, setMediaType] = useState('video'); // 'video' | 'audio'
+  const [videoContainer, setVideoContainer] = useState('mp4'); // 'mp4' | 'mkv' | 'webm'
   const [resolution, setResolution] = useState('best'); // 'best' | '2160' | '1440' | '1080' | '720' | '480' | 'custom'
   const [customResolution, setCustomResolution] = useState('1920x1080'); // User requested: Custom resolution text input
   const [fastReencode, setFastReencode] = useState(false); // User requested: Fast Re-encoding in MP4
