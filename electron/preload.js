@@ -32,6 +32,14 @@ contextBridge.exposeInMainWorld('itzDownloaderAPI', {
       return '';
     }
   },
+  writeClipboard: (text) => {
+    try {
+      clipboard.writeText(text);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  },
 
   // Engine Status & Auto-Downloads (yt-dlp + FFmpeg)
   getEngineStatus: (force = false) => ipcRenderer.invoke('engine:getStatus', force),

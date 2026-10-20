@@ -14,7 +14,11 @@ import {
   X,
   AlertTriangle,
   Radio,
-  FileAudio
+  FileAudio,
+  ListMusic,
+  Disc,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import { detectPlatform, validateMediaUrl } from '../utils/platformDetect';
 import { formatDuration } from '../utils/formatters';
@@ -34,6 +38,8 @@ export default function InstantTab({
   const [selectedPreset, setSelectedPreset] = useState('best_video');
   const [isDownloading, setIsDownloading] = useState(false);
   const [inspectError, setInspectError] = useState(null);
+  const [playlistMode, setPlaylistMode] = useState('playlist'); // 'playlist' | 'single'
+  const [showTracklistPreview, setShowTracklistPreview] = useState(false);
 
   const resultsRef = useRef(null);
 
@@ -56,18 +62,22 @@ export default function InstantTab({
     setMediaInfo(null);
     setInspectError(null);
     setIsDownloading(false);
+    setPlaylistMode('playlist');
+    setShowTracklistPreview(false);
   };
 
   const handleUrlChange = (newVal) => {
     setUrl(newVal);
     if (inspectError) setInspectError(null);
     if (mediaInfo) setMediaInfo(null);
+    setShowTracklistPreview(false);
   };
 
   const inspectTargetUrl = async (targetUrl = url) => {
     const clean = (targetUrl || '').trim();
     setInspectError(null);
     setMediaInfo(null);
+    setShowTracklistPreview(false);
 
     const validation = validateMediaUrl(clean);
     if (!validation.isValid) {
@@ -94,6 +104,7 @@ export default function InstantTab({
       const info = await window.itzDownloaderAPI.inspectUrl(clean, {});
       setMediaInfo(info);
       setInspectError(null);
+      setPlaylistMode('playlist');
 
       // Auto-select smart preset based on platform & content
       if (info.isAudioOnly || detected.isAudioOnly) {
@@ -147,9 +158,60 @@ export default function InstantTab({
       return;
     }
 
+    // Playlist download handling
+    if (mediaInfo?.isPlaylist && (playlistMode === 'playlist' || !mediaInfo.isVideoAndPlaylist)) {
+      const jobId = `pl_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const jobConfig = {
+        jobId,
+        isPlaylist: true,
+        url: targetUrl,
+        outputDir: defaultOutputDir,
+        preset: presetToUse,
+        title: mediaInfo?.title || targetUrl,
+        author: mediaInfo?.author || platform.name,
+        thumbnail: mediaInfo?.thumbnail || null,
+        platform: platform.id,
+        duration: mediaInfo?.duration || 0,
+        totalItems: mediaInfo?.entries ? mediaInfo.entries.length : 0,
+        entries: mediaInfo?.entries || [],
+        createdAt: Date.now(),
+      };
+
+      onAddJob(jobConfig);
+      onShowToast(`Started playlist download: ${mediaInfo?.title || 'Playlist'} (${mediaInfo?.itemCount || 0} tracks)`, 'success');
+      setIsDownloading(true);
+      return;
+    }
+
+    // Single video extraction from a video-in-playlist link
+    if (mediaInfo?.isPlaylist && mediaInfo?.isVideoAndPlaylist && playlistMode === 'single') {
+      const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const singleUrl = `https://www.youtube.com/watch?v=${mediaInfo.singleVideoId}`;
+      const jobConfig = {
+        jobId,
+        isPlaylist: false,
+        url: singleUrl,
+        outputDir: defaultOutputDir,
+        preset: presetToUse,
+        title: mediaInfo?.singleVideoTitle || mediaInfo?.title || 'YouTube Video',
+        author: mediaInfo?.author || platform.name,
+        thumbnail: mediaInfo?.singleVideoThumbnail || mediaInfo?.thumbnail || null,
+        platform: platform.id,
+        duration: 0,
+        createdAt: Date.now(),
+      };
+
+      onAddJob(jobConfig);
+      onShowToast(`Started download: ${jobConfig.title}`, 'success');
+      setIsDownloading(true);
+      return;
+    }
+
+    // Standard single media download
     const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const jobConfig = {
       jobId,
+      isPlaylist: false,
       url: targetUrl,
       outputDir: defaultOutputDir,
       preset: presetToUse,
@@ -310,13 +372,23 @@ export default function InstantTab({
               </div>
             ) : (
               <div className="media-thumb-placeholder">
-                {mediaInfo.isAudioOnly ? <Music size={32} color="#e6b422" /> : <Film size={32} color="#e6b422" />}
+                {mediaInfo.isPlaylist ? (
+                  <ListMusic size={32} color="#e6b422" />
+                ) : mediaInfo.isAudioOnly ? (
+                  <Music size={32} color="#e6b422" />
+                ) : (
+                  <Film size={32} color="#e6b422" />
+                )}
               </div>
             )}
 
             <div className="media-meta-details">
               <div className="media-title-row">
-                <span className="media-title-text" title={mediaInfo.title}>{mediaInfo.title}</span>
+                <span className="media-title-text" title={mediaInfo.title}>
+                  {mediaInfo.isVideoAndPlaylist && playlistMode === 'single'
+                    ? (mediaInfo.singleVideoTitle || mediaInfo.title)
+                    : mediaInfo.title}
+                </span>
               </div>
               <div className="media-subtitle-row">
                 <span className="media-author-pill">{mediaInfo.author}</span>
@@ -326,8 +398,14 @@ export default function InstantTab({
                   </span>
                 )}
                 {mediaInfo.isLive && <span className="media-live-badge">LIVE</span>}
-                {isAudioOnlyMedia && <span className="media-type-badge audio">AUDIO TRACK</span>}
-                {!isAudioOnlyMedia && <span className="media-type-badge video">VIDEO STREAM</span>}
+                {mediaInfo.isPlaylist && (
+                  <span className="media-type-badge playlist">
+                    <ListMusic size={11} style={{ marginRight: 3, verticalAlign: 'middle' }} />
+                    {mediaInfo.isAlbum ? `ALBUM • ${mediaInfo.itemCount} TRACKS` : `PLAYLIST • ${mediaInfo.itemCount} SONGS`}
+                  </span>
+                )}
+                {!mediaInfo.isPlaylist && isAudioOnlyMedia && <span className="media-type-badge audio">AUDIO TRACK</span>}
+                {!mediaInfo.isPlaylist && !isAudioOnlyMedia && <span className="media-type-badge video">VIDEO STREAM</span>}
               </div>
             </div>
           </div>
@@ -342,6 +420,67 @@ export default function InstantTab({
               <ExternalLink size={13} />
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Mode Switcher for Links that are a Video inside a Playlist */}
+      {mediaInfo?.isPlaylist && mediaInfo?.isVideoAndPlaylist && (
+        <div className="playlist-mode-toggle-card page-view-animated">
+          <div className="playlist-toggle-label">
+            <span>Video in Playlist detected:</span>
+          </div>
+          <div className="playlist-toggle-buttons">
+            <button
+              type="button"
+              className={`playlist-toggle-btn ${playlistMode === 'playlist' ? 'active' : ''}`}
+              onClick={() => setPlaylistMode('playlist')}
+            >
+              <ListMusic size={14} />
+              <span>Download Entire Playlist ({mediaInfo.itemCount} items)</span>
+            </button>
+            <button
+              type="button"
+              className={`playlist-toggle-btn ${playlistMode === 'single' ? 'active' : ''}`}
+              onClick={() => setPlaylistMode('single')}
+            >
+              <Film size={14} />
+              <span>Download This Video Only</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Playlist Tracklist Preview Accordion */}
+      {mediaInfo?.isPlaylist && mediaInfo.entries && mediaInfo.entries.length > 0 && (playlistMode === 'playlist' || !mediaInfo.isVideoAndPlaylist) && (
+        <div className="playlist-preview-card page-view-animated">
+          <button
+            type="button"
+            className="playlist-preview-toggle-btn"
+            onClick={() => setShowTracklistPreview(!showTracklistPreview)}
+          >
+            <div className="playlist-toggle-title">
+              <ListMusic size={15} color="#e6b422" />
+              <span>Songs in this Playlist ({mediaInfo.entries.length})</span>
+            </div>
+            {showTracklistPreview ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+          </button>
+
+          {showTracklistPreview && (
+            <div className="playlist-preview-list">
+              {mediaInfo.entries.map((entry, idx) => (
+                <div key={entry.id || idx} className="playlist-preview-item">
+                  <span className="preview-item-idx">#{idx + 1}</span>
+                  <div className="preview-item-info">
+                    <span className="preview-item-title">{entry.title}</span>
+                    <span className="preview-item-author">{entry.author}</span>
+                  </div>
+                  {entry.duration > 0 && (
+                    <span className="preview-item-duration">{formatDuration(entry.duration)}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -632,7 +771,11 @@ export default function InstantTab({
                   disabled={isInspecting || !url.trim()}
                 >
                   <Sparkles size={17} />
-                  <span>Download Now</span>
+                  <span>
+                    {mediaInfo?.isPlaylist && playlistMode === 'playlist'
+                      ? `Download Playlist (${mediaInfo.itemCount || 0} Songs)`
+                      : 'Download Now'}
+                  </span>
                 </button>
               )}
             </div>

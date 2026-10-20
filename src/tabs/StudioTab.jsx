@@ -128,9 +128,14 @@ export default function StudioTab({
       return;
     }
 
-    const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const isPlaylist = !!mediaInfo?.isPlaylist;
+    const jobId = isPlaylist
+      ? `pl_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
+      : `job_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
     const jobConfig = {
       jobId,
+      isPlaylist,
       url: clean,
       outputDir: defaultOutputDir,
       preset: 'custom',
@@ -139,6 +144,8 @@ export default function StudioTab({
       thumbnail: mediaInfo?.thumbnail || null,
       platform: platform.id,
       duration: mediaInfo?.duration || 0,
+      totalItems: mediaInfo?.entries ? mediaInfo.entries.length : 0,
+      entries: mediaInfo?.entries || [],
       customOptions: {
         mediaType,
         format: videoContainer,
@@ -160,7 +167,7 @@ export default function StudioTab({
     };
 
     onAddJob(jobConfig);
-    onShowToast(`Custom job queued: ${mediaInfo?.title || 'Media'}`, 'success');
+    onShowToast(`Custom job queued: ${mediaInfo?.title || 'Media'}${isPlaylist ? ` (${mediaInfo.itemCount} tracks)` : ''}`, 'success');
   };
 
   return (
@@ -240,7 +247,7 @@ export default function StudioTab({
             <div className="studio-snippet-info">
               <span className="snippet-title">{mediaInfo.title}</span>
               <span className="snippet-meta">
-                {mediaInfo.author} • {formatDuration(mediaInfo.duration)}
+                {mediaInfo.author} • {mediaInfo.isPlaylist ? `${mediaInfo.itemCount || 0} Tracks • ` : ''}{formatDuration(mediaInfo.duration)}
                 {mediaInfo.resolutions?.length > 0 && ` • Up to ${mediaInfo.resolutions[0].label}`}
               </span>
             </div>
@@ -655,7 +662,11 @@ export default function StudioTab({
             disabled={!url.trim() || !platform.isAllowed}
           >
             <Sparkles size={17} />
-            <span>Start Advanced Download</span>
+            <span>
+              {mediaInfo?.isPlaylist
+                ? `Start Advanced Download (${mediaInfo.itemCount || 0} Tracks)`
+                : 'Start Advanced Download'}
+            </span>
           </button>
         </div>
       </div>

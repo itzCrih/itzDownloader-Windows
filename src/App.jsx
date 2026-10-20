@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { DownloadCloud, ShieldCheck, Lock, Sparkles } from 'lucide-react';
 import TitleBar from './components/TitleBar';
 import Navbar from './components/Navbar';
@@ -55,8 +55,8 @@ export default function App() {
 
   const [updateState, setUpdateState] = useState({
     status: 'idle',
-    currentVersion: '1.2.3',
-    latestVersion: '1.2.3',
+    currentVersion: '1.2.4',
+    latestVersion: '1.2.4',
     downloadPercent: 0,
     error: null,
   });
@@ -84,6 +84,41 @@ export default function App() {
     }, 300);
   };
 
+  const jobsRef = useRef(jobs);
+  useEffect(() => {
+    jobsRef.current = jobs;
+  }, [jobs]);
+
+  const startNextPlaylistItem = async (playlistJobId, itemIndex) => {
+    const currentJobs = jobsRef.current;
+    const playlistJob = currentJobs.find((j) => j.jobId === playlistJobId);
+    if (!playlistJob || !playlistJob.items) return;
+    const item = playlistJob.items[itemIndex];
+    if (!item) return;
+
+    const subJobConfig = {
+      jobId: item.subJobId,
+      playlistJobId: playlistJob.jobId,
+      url: item.url,
+      targetSearch: item.targetSearch,
+      title: item.title,
+      author: item.author,
+      thumbnail: item.thumbnail,
+      outputDir: playlistJob.outputDir || defaultOutputDir,
+      preset: playlistJob.preset,
+      customOptions: playlistJob.customOptions,
+      globalRateLimit,
+      cookiesBrowser: defaultCookiesBrowser,
+      isPlaylist: false,
+    };
+
+    try {
+      await window.itzDownloaderAPI.startJob(subJobConfig);
+    } catch (e) {
+      // Handled via onJobError
+    }
+  };
+
   // Mandatory initial startup probe & auto-engine preparation
   useEffect(() => {
     if (!window.itzDownloaderAPI) return;
@@ -100,20 +135,106 @@ export default function App() {
     // Subscriptions
     const unsubProgress = window.itzDownloaderAPI.onJobProgress((data) => {
       setJobs((prev) =>
-        prev.map((j) => (j.jobId === data.jobId ? { ...j, status: data.status, progress: data } : j))
+        prev.map((j) => {
+          if (j.isPlaylist && Array.isArray(j.items)) {
+            const itemIdx = j.items.findIndex((it) => it.subJobId === data.jobId);
+            if (itemIdx !== -1) {
+              const updatedItems = [...j.items];
+              updatedItems[itemIdx] = {
+                ...updatedItems[itemIdx],
+                status: data.status,
+                progress: data,
+              };
+              const completedCount = updatedItems.filter((it) => it.status === 'completed').length;
+              const currentItemPercent = data.percent || 0;
+              const overallPercent = Math.min(99.9, ((completedCount * 100) + currentItemPercent) / Math.max(1, j.totalItems));
+              return {
+                ...j,
+                status: 'downloading',
+                activeItemIndex: itemIdx,
+                activeSubJobId: data.jobId,
+                completedCount,
+                progress: {
+                  ...data,
+                  percent: parseFloat(overallPercent.toFixed(1)),
+                  currentSongTitle: updatedItems[itemIdx].title,
+                },
+                items: updatedItems,
+              };
+            }
+          }
+          if (j.jobId === data.jobId) {
+            return { ...j, status: data.status, progress: data };
+          }
+          return j;
+        })
       );
     });
 
     const unsubComplete = window.itzDownloaderAPI.onJobComplete((data) => {
+      let nextPlaylistToStart = null;
+      let playlistFinishedTitle = null;
+
       setJobs((prev) =>
-        prev.map((j) =>
-          j.jobId === data.jobId
-            ? { ...j, status: 'completed', outputSize: data.outputSize, outputPath: data.outputPath }
-            : j
-        )
+        prev.map((j) => {
+          if (j.isPlaylist && Array.isArray(j.items)) {
+            const itemIdx = j.items.findIndex((it) => it.subJobId === data.jobId);
+            if (itemIdx !== -1) {
+              const updatedItems = [...j.items];
+              updatedItems[itemIdx] = {
+                ...updatedItems[itemIdx],
+                status: 'completed',
+                outputPath: data.outputPath,
+                outputSize: data.outputSize,
+                progress: { percent: 100 },
+              };
+              const completedCount = updatedItems.filter((it) => it.status === 'completed').length;
+              const nextQueuedIdx = updatedItems.findIndex((it) => it.status === 'queued');
+
+              if (nextQueuedIdx !== -1) {
+                updatedItems[nextQueuedIdx] = {
+                  ...updatedItems[nextQueuedIdx],
+                  status: 'downloading',
+                };
+                nextPlaylistToStart = { playlistId: j.jobId, nextIdx: nextQueuedIdx };
+              } else {
+                playlistFinishedTitle = j.title;
+              }
+
+              const allDone = updatedItems.every((it) => it.status === 'completed' || it.status === 'error' || it.status === 'canceled');
+
+              return {
+                ...j,
+                status: allDone ? 'completed' : 'downloading',
+                completedCount,
+                activeItemIndex: nextQueuedIdx !== -1 ? nextQueuedIdx : itemIdx,
+                activeSubJobId: nextQueuedIdx !== -1 ? updatedItems[nextQueuedIdx].subJobId : null,
+                items: updatedItems,
+                progress: {
+                  percent: Math.min(100, Math.round((completedCount / Math.max(1, j.totalItems)) * 100)),
+                  speed: null,
+                  eta: null,
+                },
+              };
+            }
+          }
+
+          if (j.jobId === data.jobId) {
+            return { ...j, status: 'completed', outputSize: data.outputSize, outputPath: data.outputPath };
+          }
+          return j;
+        })
       );
-      if (soundEnabled) playCompletionChime();
-      showToast('Download finished successfully!', 'success');
+
+      if (nextPlaylistToStart) {
+        startNextPlaylistItem(nextPlaylistToStart.playlistId, nextPlaylistToStart.nextIdx);
+      } else if (playlistFinishedTitle) {
+        if (soundEnabled) playCompletionChime();
+        showToast(`Playlist finished: "${playlistFinishedTitle}"!`, 'success');
+      } else {
+        if (soundEnabled) playCompletionChime();
+        showToast('Download finished successfully!', 'success');
+      }
     });
 
     const unsubCanceled = window.itzDownloaderAPI.onJobCanceled((data) => {
@@ -122,15 +243,80 @@ export default function App() {
     });
 
     const unsubError = window.itzDownloaderAPI.onJobError((data) => {
+      let nextPlaylistToStart = null;
+
       setJobs((prev) =>
-        prev.map((j) => (j.jobId === data.jobId ? { ...j, status: 'error', error: data.error } : j))
+        prev.map((j) => {
+          if (j.isPlaylist && Array.isArray(j.items)) {
+            const itemIdx = j.items.findIndex((it) => it.subJobId === data.jobId);
+            if (itemIdx !== -1) {
+              const updatedItems = [...j.items];
+              updatedItems[itemIdx] = {
+                ...updatedItems[itemIdx],
+                status: 'error',
+                error: data.error,
+              };
+              const nextQueuedIdx = updatedItems.findIndex((it) => it.status === 'queued');
+
+              if (nextQueuedIdx !== -1) {
+                updatedItems[nextQueuedIdx] = {
+                  ...updatedItems[nextQueuedIdx],
+                  status: 'downloading',
+                };
+                nextPlaylistToStart = { playlistId: j.jobId, nextIdx: nextQueuedIdx };
+              }
+
+              const allDone = updatedItems.every((it) => it.status === 'completed' || it.status === 'error' || it.status === 'canceled');
+
+              return {
+                ...j,
+                status: allDone ? 'completed' : 'downloading',
+                activeItemIndex: nextQueuedIdx !== -1 ? nextQueuedIdx : itemIdx,
+                activeSubJobId: nextQueuedIdx !== -1 ? updatedItems[nextQueuedIdx].subJobId : null,
+                items: updatedItems,
+              };
+            }
+          }
+
+          if (j.jobId === data.jobId) {
+            return { ...j, status: 'error', error: data.error };
+          }
+          return j;
+        })
       );
-      showToast(`Download error: ${data.error}`, 'error');
+
+      if (nextPlaylistToStart) {
+        startNextPlaylistItem(nextPlaylistToStart.playlistId, nextPlaylistToStart.nextIdx);
+        showToast(`Skipped track with error: ${data.error}`, 'warning');
+      } else {
+        showToast(`Download error: ${data.error}`, 'error');
+      }
     });
 
     const unsubLog = window.itzDownloaderAPI.onJobLog((data) => {
       setJobs((prev) =>
         prev.map((j) => {
+          if (j.isPlaylist && Array.isArray(j.items)) {
+            const itemIdx = j.items.findIndex((it) => it.subJobId === data.jobId);
+            if (itemIdx !== -1) {
+              const updatedItems = [...j.items];
+              const itemLogs = updatedItems[itemIdx].logs ? [...updatedItems[itemIdx].logs, data.text] : [data.text];
+              if (itemLogs.length > 200) itemLogs.shift();
+              updatedItems[itemIdx] = {
+                ...updatedItems[itemIdx],
+                logs: itemLogs,
+              };
+
+              const pLogs = j.logs ? [...j.logs, `[Track ${updatedItems[itemIdx].index}] ${data.text}`] : [`[Track ${updatedItems[itemIdx].index}] ${data.text}`];
+              if (pLogs.length > 300) pLogs.shift();
+              return {
+                ...j,
+                logs: pLogs,
+                items: updatedItems,
+              };
+            }
+          }
+
           if (j.jobId === data.jobId) {
             const logs = j.logs ? [...j.logs, data.text] : [data.text];
             if (logs.length > 200) logs.shift();
@@ -199,6 +385,52 @@ export default function App() {
   };
 
   const handleAddJob = async (jobConfig) => {
+    if (jobConfig.isPlaylist) {
+      const playlistJobId = jobConfig.jobId || `pl_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const entries = jobConfig.entries || [];
+      const items = entries.map((entry, idx) => ({
+        subJobId: `${playlistJobId}_item_${idx + 1}`,
+        index: idx + 1,
+        id: entry.id,
+        title: entry.title,
+        author: entry.author,
+        duration: entry.duration,
+        thumbnail: entry.thumbnail,
+        url: entry.url,
+        targetSearch: entry.targetSearch,
+        status: idx === 0 ? 'downloading' : 'queued',
+        progress: { percent: 0, speed: null, eta: null },
+        logs: [],
+        outputPath: null,
+        outputSize: 0,
+        error: null,
+      }));
+
+      const fullPlaylistConfig = {
+        ...jobConfig,
+        jobId: playlistJobId,
+        isPlaylist: true,
+        globalRateLimit,
+        cookiesBrowser: defaultCookiesBrowser,
+        status: 'downloading',
+        totalItems: items.length,
+        completedCount: 0,
+        activeItemIndex: 0,
+        activeSubJobId: items[0]?.subJobId,
+        progress: { percent: 0, speed: null, eta: null },
+        items,
+        logs: [],
+      };
+
+      setJobs((prev) => [fullPlaylistConfig, ...prev]);
+      showToast(`Queued playlist: "${fullPlaylistConfig.title}" (${items.length} songs)`, 'success');
+
+      if (items.length > 0) {
+        startNextPlaylistItem(playlistJobId, 0);
+      }
+      return;
+    }
+
     const fullConfig = {
       ...jobConfig,
       globalRateLimit,
@@ -218,9 +450,80 @@ export default function App() {
   };
 
   const handleCancelJob = (jobId) => {
+    const job = jobs.find((j) => j.jobId === jobId);
+    if (job?.isPlaylist) {
+      if (job.activeSubJobId && window.itzDownloaderAPI) {
+        window.itzDownloaderAPI.cancelJob(job.activeSubJobId);
+      }
+      setJobs((prev) =>
+        prev.map((j) => {
+          if (j.jobId === jobId) {
+            return {
+              ...j,
+              status: 'canceled',
+              items: j.items.map((it) =>
+                it.status === 'downloading' || it.status === 'queued' ? { ...it, status: 'canceled' } : it
+              ),
+            };
+          }
+          return j;
+        })
+      );
+      showToast(`Playlist "${job.title}" canceled.`, 'info');
+      return;
+    }
+
     if (window.itzDownloaderAPI) {
       window.itzDownloaderAPI.cancelJob(jobId);
     }
+  };
+
+  const handleCancelPlaylistItem = (playlistJobId, subJobId) => {
+    let nextToStart = null;
+    setJobs((prev) =>
+      prev.map((j) => {
+        if (j.jobId === playlistJobId && Array.isArray(j.items)) {
+          const itemIdx = j.items.findIndex((it) => it.subJobId === subJobId);
+          if (itemIdx === -1) return j;
+
+          const isCurrentlyDownloading = j.items[itemIdx].status === 'downloading';
+          if (isCurrentlyDownloading && window.itzDownloaderAPI) {
+            window.itzDownloaderAPI.cancelJob(subJobId);
+          }
+
+          const updatedItems = [...j.items];
+          updatedItems[itemIdx] = {
+            ...updatedItems[itemIdx],
+            status: 'canceled',
+          };
+
+          if (isCurrentlyDownloading) {
+            const nextQueuedIdx = updatedItems.findIndex((it) => it.status === 'queued');
+            if (nextQueuedIdx !== -1) {
+              updatedItems[nextQueuedIdx] = {
+                ...updatedItems[nextQueuedIdx],
+                status: 'downloading',
+              };
+              nextToStart = { playlistId: j.jobId, nextIdx: nextQueuedIdx };
+            }
+          }
+
+          const allDone = updatedItems.every((it) => it.status === 'completed' || it.status === 'error' || it.status === 'canceled');
+
+          return {
+            ...j,
+            status: allDone ? 'completed' : 'downloading',
+            items: updatedItems,
+          };
+        }
+        return j;
+      })
+    );
+
+    if (nextToStart) {
+      startNextPlaylistItem(nextToStart.playlistId, nextToStart.nextIdx);
+    }
+    showToast('Track download canceled.', 'info');
   };
 
   const handleClearCompleted = () => {
@@ -406,6 +709,7 @@ export default function App() {
               <QueueTab
                 jobs={jobs}
                 onCancelJob={handleCancelJob}
+                onCancelPlaylistItem={handleCancelPlaylistItem}
                 onClearCompleted={handleClearCompleted}
                 onShowToast={showToast}
                 onNavigateToInstant={() => setActiveTab('instant')}
@@ -475,7 +779,7 @@ export default function App() {
           </div>
 
           <div>
-            <span style={{ fontFamily: 'var(--font-mono)' }}>itzDownloader Desktop v1.2.3</span>
+            <span style={{ fontFamily: 'var(--font-mono)' }}>itzDownloader Desktop v1.2.4</span>
           </div>
         </footer>
       </div>

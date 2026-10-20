@@ -84,7 +84,7 @@ function validateMediaUrl(targetUrl = '') {
     const isShort = pathname.startsWith('/shorts/');
     const isLive = pathname.startsWith('/live/');
     const isEmbed = pathname.startsWith('/embed/');
-    const isPlaylist = pathname === '/playlist' && (parsed.searchParams.has('list') || search.includes('list='));
+    const isPlaylist = (pathname === '/playlist' || pathname.startsWith('/playlist') || pathname === '/watch') && (parsed.searchParams.has('list') || search.includes('list='));
 
     if (pathname.startsWith('/@') || pathname.startsWith('/channel/') || pathname.startsWith('/c/') || pathname.startsWith('/user/')) {
       return {
@@ -232,6 +232,9 @@ class Downloader {
 
     // 1. Check for Spotify URLs
     if (cleanUrl.includes('spotify.com/')) {
+      if (cleanUrl.includes('/playlist/') || cleanUrl.includes('/album/')) {
+        return await this._inspectSpotifyPlaylistOrAlbum(cleanUrl);
+      }
       return await this._inspectSpotifyUrl(cleanUrl);
     }
 
@@ -252,12 +255,32 @@ class Downloader {
       throw new Error('yt-dlp is not available. Please install it in Settings.');
     }
 
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(cleanUrl.startsWith('http') ? cleanUrl : `https://${cleanUrl}`);
+    } catch (e) {
+      parsedUrl = null;
+    }
+
+    const host = parsedUrl ? parsedUrl.hostname.toLowerCase().replace(/^www\./, '') : '';
+    const pathname = parsedUrl ? parsedUrl.pathname.toLowerCase().replace(/\/+$/, '') : '';
+    const isYoutube = host === 'youtube.com' || host === 'm.youtube.com' || host === 'music.youtube.com' || host === 'youtu.be';
+    const hasListParam = parsedUrl && (parsedUrl.searchParams.has('list') || parsedUrl.search.includes('list='));
+    const isPurePlaylist = isYoutube && (pathname === '/playlist' || pathname.startsWith('/playlist')) && hasListParam;
+    const isVideoWithPlaylist = isYoutube && (pathname === '/watch' || host === 'youtu.be') && hasListParam;
+    const isPlaylistInspection = isPurePlaylist || isVideoWithPlaylist;
+
     const args = [
       '--dump-single-json',
       '--no-warnings',
-      '--no-playlist',
-      '--skip-download',
     ];
+
+    if (isPlaylistInspection) {
+      args.push('--flat-playlist');
+    } else {
+      args.push('--no-playlist');
+      args.push('--skip-download');
+    }
 
     if (options.cookiesBrowser && options.cookiesBrowser !== 'none') {
       args.push('--cookies-from-browser', options.cookiesBrowser);
@@ -283,19 +306,68 @@ class Downloader {
           const info = JSON.parse(stdout);
 
           // Proactive guard against playlist tabs, channel profiles, or empty recommendations feeds
-          if (info.extractor && (info.extractor.includes(':tab') || info.extractor.includes(':channel'))) {
-            return reject(new Error(`The provided link points to a channel or recommendations tab ("${info.title || 'Tab'}"), not a downloadable video.`));
-          }
-          if (info.title && ['recommended', 'home', 'feed', 'trending', 'explore'].includes(info.title.toLowerCase().trim())) {
-            return reject(new Error('This link points to a recommendations feed, not a downloadable video. Please provide a direct video link.'));
-          }
-          if ((!info.formats || info.formats.length === 0) && !info.url && !info.direct_url) {
-            return reject(new Error('No downloadable video or audio streams were found for this media link.'));
+          const isPlaylistResult = info._type === 'playlist' || (Array.isArray(info.entries) && info.entries.length > 0);
+          if (!isPlaylistResult) {
+            if (info.extractor && (info.extractor.includes(':channel') || (info.extractor.includes(':tab') && !info.extractor.includes('playlist')))) {
+              return reject(new Error(`The provided link points to a channel or recommendations tab ("${info.title || 'Tab'}"), not a downloadable video.`));
+            }
+            if (info.title && ['recommended', 'home', 'feed', 'trending', 'explore'].includes(info.title.toLowerCase().trim())) {
+              return reject(new Error('This link points to a recommendations feed, not a downloadable video. Please provide a direct video link.'));
+            }
+            if ((!info.formats || info.formats.length === 0) && !info.url && !info.direct_url) {
+              return reject(new Error('No downloadable video or audio streams were found for this media link.'));
+            }
           }
 
           const platform = this._detectPlatform(cleanUrl, info.extractor);
 
-          // Extract unique resolution formats
+          // If playlist result detected
+          if (isPlaylistResult) {
+            const playlistEntries = (info.entries || []).map((entry, idx) => {
+              const thumb = entry.thumbnails && entry.thumbnails.length > 0
+                ? entry.thumbnails[entry.thumbnails.length - 1].url
+                : null;
+              const entryId = entry.id || `entry_${idx}`;
+              const videoUrl = entry.url && entry.url.startsWith('http')
+                ? entry.url
+                : `https://www.youtube.com/watch?v=${entryId}`;
+
+              return {
+                index: idx + 1,
+                id: entryId,
+                title: entry.title || `Track ${idx + 1}`,
+                author: entry.uploader || entry.channel || info.uploader || 'YouTube',
+                duration: entry.duration || 0,
+                thumbnail: thumb,
+                url: videoUrl,
+              };
+            });
+
+            const totalDuration = playlistEntries.reduce((acc, curr) => acc + (curr.duration || 0), 0);
+            const singleVideoId = parsedUrl ? (parsedUrl.searchParams.get('v') || (host === 'youtu.be' ? pathname.replace(/^\//, '') : null)) : null;
+            const singleEntry = singleVideoId ? playlistEntries.find((e) => e.id === singleVideoId) : null;
+
+            return resolve({
+              url: cleanUrl,
+              isPlaylist: true,
+              isVideoAndPlaylist: !!isVideoWithPlaylist,
+              singleVideoId,
+              singleVideoTitle: singleEntry?.title || null,
+              singleVideoThumbnail: singleEntry?.thumbnail || null,
+              title: info.title || 'YouTube Playlist',
+              author: info.uploader || info.channel || 'YouTube',
+              duration: totalDuration,
+              thumbnail: info.thumbnail || (playlistEntries[0]?.thumbnail) || null,
+              platform,
+              itemCount: playlistEntries.length,
+              entries: playlistEntries,
+              isLive: false,
+              isAudioOnly: false,
+              resolutions: [],
+            });
+          }
+
+          // Extract unique resolution formats for single media
           const availableResolutions = [];
           if (Array.isArray(info.formats)) {
             const seenHeights = new Set();
@@ -314,6 +386,7 @@ class Downloader {
 
           resolve({
             url: cleanUrl,
+            isPlaylist: false,
             title: info.title || 'Untitled Media',
             author: info.uploader || info.channel || info.creator || platform,
             duration: info.duration || 0,
@@ -332,6 +405,88 @@ class Downloader {
 
       proc.on('error', (err) => {
         reject(err);
+      });
+    });
+  }
+
+  async _inspectSpotifyPlaylistOrAlbum(spotifyUrl) {
+    const isAlbum = spotifyUrl.includes('/album/');
+    const embedUrl = spotifyUrl.replace('open.spotify.com/', 'open.spotify.com/embed/');
+
+    return new Promise((resolve, reject) => {
+      https.get(embedUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        },
+      }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          return resolve(this._inspectSpotifyPlaylistOrAlbum(res.headers.location));
+        }
+
+        let body = '';
+        res.on('data', (d) => { body += d.toString(); });
+        res.on('end', () => {
+          try {
+            const idx = body.indexOf('__NEXT_DATA__');
+            if (idx === -1) {
+              return this._inspectSpotifyUrl(spotifyUrl).then(resolve).catch(reject);
+            }
+
+            const start = body.indexOf('>', idx) + 1;
+            const end = body.indexOf('</script>', start);
+            const json = JSON.parse(body.slice(start, end));
+            const entity = json.props?.pageProps?.state?.data?.entity;
+
+            if (!entity || !Array.isArray(entity.trackList)) {
+              return this._inspectSpotifyUrl(spotifyUrl).then(resolve).catch(reject);
+            }
+
+            const playlistTitle = entity.name || (isAlbum ? 'Spotify Album' : 'Spotify Playlist');
+            const playlistAuthor = entity.subtitle || (entity.artists && entity.artists.map((a) => a.name).join(', ')) || 'Spotify';
+            const playlistThumbnail = entity.coverArt?.sources?.[0]?.url || null;
+
+            const entries = entity.trackList.map((track, i) => {
+              const trackId = track.uri ? track.uri.replace('spotify:track:', '') : `track_${i}`;
+              const trackUrl = `https://open.spotify.com/track/${trackId}`;
+              const artist = track.subtitle || playlistAuthor;
+              const title = track.title || `Track ${i + 1}`;
+              const duration = Math.round((track.duration || 0) / 1000);
+
+              return {
+                index: i + 1,
+                id: trackId,
+                title,
+                author: artist,
+                duration,
+                thumbnail: playlistThumbnail,
+                url: trackUrl,
+                targetSearch: `ytsearch1:${artist} - ${title} official audio`,
+              };
+            });
+
+            const totalDuration = entries.reduce((acc, curr) => acc + (curr.duration || 0), 0);
+
+            resolve({
+              url: spotifyUrl,
+              title: playlistTitle,
+              author: playlistAuthor,
+              duration: totalDuration,
+              thumbnail: playlistThumbnail,
+              platform: 'spotify',
+              isPlaylist: true,
+              isAlbum,
+              isLive: false,
+              isAudioOnly: true,
+              itemCount: entries.length,
+              entries,
+              resolutions: [],
+            });
+          } catch (err) {
+            this._inspectSpotifyUrl(spotifyUrl).then(resolve).catch(reject);
+          }
+        });
+      }).on('error', (err) => {
+        this._inspectSpotifyUrl(spotifyUrl).then(resolve).catch(reject);
       });
     });
   }
@@ -360,6 +515,7 @@ class Downloader {
               duration: 0,
               thumbnail: data.thumbnail_url || null,
               platform: 'spotify',
+              isPlaylist: false,
               isLive: false,
               isAudioOnly: true,
               targetSearch: `ytsearch1:${author} - ${title} audio`,
@@ -615,19 +771,21 @@ class Downloader {
       throw new Error('yt-dlp is missing. Download it from the Settings tab.');
     }
 
-    let downloadUrl = url;
+    let downloadUrl = jobConfig.targetSearch || url;
     let isSpotify = false;
 
     // Spotify track redirection
-    if (url.includes('spotify.com/')) {
+    if (!jobConfig.targetSearch && url.includes('spotify.com/')) {
       isSpotify = true;
       try {
         const spotifyInfo = await this._inspectSpotifyUrl(url);
-        downloadUrl = `ytsearch1:${spotifyInfo.author} - ${spotifyInfo.title} official audio`;
+        downloadUrl = spotifyInfo.targetSearch || `ytsearch1:${spotifyInfo.author} - ${spotifyInfo.title} official audio`;
         if (onLog) onLog(`[Spotify Resolver] Found track "${spotifyInfo.title}" by ${spotifyInfo.author}`);
       } catch (e) {
         if (onLog) onLog(`[Spotify Warning] Direct track parse failed, attempting standard URL download`);
       }
+    } else if (jobConfig.targetSearch) {
+      isSpotify = true;
     }
 
     const args = [
@@ -635,6 +793,11 @@ class Downloader {
       '--no-mtime',
       '--embed-metadata',
     ];
+
+    // Guarantee that single track downloads never loop through playlists unintentionally
+    if (!jobConfig.isPlaylist) {
+      args.push('--no-playlist');
+    }
 
     // Point to ffmpeg if available
     if (this.engineManager.ffmpegPath) {
