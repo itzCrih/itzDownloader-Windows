@@ -8,7 +8,7 @@
 The high-performance, private Windows workstation for instant video & audio downloads from YouTube, TikTok, Spotify, Instagram, and over 1,000+ online media platforms.
 
 [![Platform](https://img.shields.io/badge/Platform-Windows_10_%7C_11_(x64)-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/itzCrih/itzDownloader-Windows/releases/latest)
-[![Version](https://img.shields.io/badge/Version-v1.2.3-e6b422?style=for-the-badge)](https://github.com/itzCrih/itzDownloader-Windows/releases/latest)
+[![Version](https://img.shields.io/badge/Version-v1.2.4-e6b422?style=for-the-badge)](https://github.com/itzCrih/itzDownloader-Windows/releases/latest)
 [![Engine](https://img.shields.io/badge/yt--dlp-Native_v2025+-black?style=for-the-badge)](https://github.com/yt-dlp/yt-dlp)
 [![FFmpeg](https://img.shields.io/badge/FFmpeg-v7.1_Native-black?style=for-the-badge)](https://ffmpeg.org)
 [![Signed](https://img.shields.io/badge/Code_Signing-Authenticode_Signed-2ea043?style=for-the-badge&logo=shield&logoColor=white)](certs/)
@@ -16,19 +16,33 @@ The high-performance, private Windows workstation for instant video & audio down
 
 <br />
 
-### Download itzDownloader Desktop (v1.2.3)
+### Download itzDownloader Desktop (v1.2.4)
 
-[![Download Setup](https://img.shields.io/badge/Download_Installer-itzDownloader_Desktop_Setup_(v1.2.3)-e6b422?style=for-the-badge&logo=windows&logoColor=black)](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.2.3/itzDownloader-Desktop-Setup-1.2.3.exe)  
-[![Download Portable](https://img.shields.io/badge/Download_Portable-itzDownloader_Desktop_Portable_(v1.2.3)-ffffff?style=for-the-badge&logo=windows&logoColor=black)](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.2.3/itzDownloader-Desktop-1.2.3-Portable.exe)
+[![Download Setup](https://img.shields.io/badge/Download_Installer-itzDownloader_Desktop_Setup_(v1.2.4)-e6b422?style=for-the-badge&logo=windows&logoColor=black)](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.2.4/itzDownloader-Desktop-Setup-1.2.4.exe)  
+[![Download Portable](https://img.shields.io/badge/Download_Portable-itzDownloader_Desktop_Portable_(v1.2.4)-ffffff?style=for-the-badge&logo=windows&logoColor=black)](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.2.4/itzDownloader-Desktop-1.2.4-Portable.exe)
 
 | Package | Format | Architecture | Direct Link |
 | :--- | :--- | :--- | :--- |
-| **Windows Installer** | NSIS Setup `.exe` | Windows 10 / 11 (x64) | [itzDownloader-Desktop-Setup-1.2.3.exe](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.2.3/itzDownloader-Desktop-Setup-1.2.3.exe) |
-| **Standalone Portable** | Portable `.exe` | Windows 10 / 11 (x64) | [itzDownloader-Desktop-1.2.3-Portable.exe](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.2.3/itzDownloader-Desktop-1.2.3-Portable.exe) |
+| **Windows Installer** | NSIS Setup `.exe` | Windows 10 / 11 (x64) | [itzDownloader-Desktop-Setup-1.2.4.exe](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.2.4/itzDownloader-Desktop-Setup-1.2.4.exe) |
+| **Standalone Portable** | Portable `.exe` | Windows 10 / 11 (x64) | [itzDownloader-Desktop-1.2.4-Portable.exe](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.2.4/itzDownloader-Desktop-1.2.4-Portable.exe) |
 
 *Authenticode code signed with DigiCert RFC 3161 timestamps. Built-in Auto-Updater checks for future releases seamlessly on startup.*
 
 </div>
+
+---
+
+## What's New in v1.2.4
+
+- 🎵 **Full Playlist & Album Support for YouTube & Spotify:**
+  - **YouTube & Spotify Playlists in Queue:** Real-time playlist cards in the Download Queue showing overall progress, current song title, and an expandable list of all songs in the queue with live speeds and progress percentages.
+  - **Single vs Playlist Selector:** When pasting a video playing inside a playlist (`watch?v=...&list=...`), you can now choose between downloading the entire playlist or strictly the single video, preventing unintended background loops of hundreds of songs.
+  - **Per-Song Action Controls:** Completed tracks inside a playlist card feature individual "Play" and "Folder" buttons, with graceful skipping if an individual song is geo-blocked or removed.
+  - **Spotify Playlists & Albums:** Direct metadata extraction from Spotify playlists and albums without needing API credentials.
+- 📋 **Copiable Terminal & Console Logs:**
+  - Added a dedicated 1-click **"Copy Logs"** button in the engine logs accordion with instant visual confirmation and toast feedback.
+  - Enabled native cursor text selection across all terminal lines (`user-select: text !important`), eliminating the need to take screenshots of error logs.
+- 🛡️ **Authenticode Digitally Signed Release:** Both the NSIS Setup installer and standalone Portable executables are fully signed with RFC 3161 timestamping.
 
 ---
 

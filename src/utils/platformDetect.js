@@ -90,6 +90,51 @@ export function isDomainAllowed(url = '') {
   return WHITELIST_DOMAINS.some((domain) => host === domain || host.endsWith(`.${domain}`));
 }
 
+export function isPlaylistUrl(url = '') {
+  try {
+    const raw = (url || '').trim();
+    if (!raw) return { isPlaylist: false, isAlbum: false, isVideoAndPlaylist: false, platform: 'none' };
+    const parsed = new URL(raw.startsWith('http') ? raw : `https://${raw}`);
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
+    const pathname = parsed.pathname.toLowerCase().replace(/\/+$/, '');
+    const search = parsed.search.toLowerCase();
+    const hasList = parsed.searchParams.has('list') || search.includes('list=');
+
+    // YouTube / YouTube Music
+    if (host === 'youtube.com' || host === 'm.youtube.com' || host === 'music.youtube.com' || host === 'youtu.be') {
+      const isPure = pathname === '/playlist' || pathname.startsWith('/playlist');
+      const isVideoWithList = (pathname === '/watch' || host === 'youtu.be') && hasList;
+      if (isPure || (hasList && !parsed.searchParams.has('v'))) {
+        return { isPlaylist: true, isAlbum: false, isVideoAndPlaylist: false, platform: host.includes('music') ? 'youtubemusic' : 'youtube' };
+      }
+      if (isVideoWithList) {
+        return { isPlaylist: true, isAlbum: false, isVideoAndPlaylist: true, platform: 'youtube' };
+      }
+    }
+
+    // Spotify
+    if (host === 'spotify.com' || host.endsWith('.spotify.com')) {
+      if (pathname.startsWith('/playlist/')) {
+        return { isPlaylist: true, isAlbum: false, isVideoAndPlaylist: false, platform: 'spotify' };
+      }
+      if (pathname.startsWith('/album/')) {
+        return { isPlaylist: true, isAlbum: true, isVideoAndPlaylist: false, platform: 'spotify' };
+      }
+    }
+
+    // SoundCloud
+    if (host === 'soundcloud.com' || host.endsWith('.soundcloud.com')) {
+      if (pathname.includes('/sets/')) {
+        return { isPlaylist: true, isAlbum: false, isVideoAndPlaylist: false, platform: 'soundcloud' };
+      }
+    }
+
+    return { isPlaylist: false, isAlbum: false, isVideoAndPlaylist: false, platform: host };
+  } catch (e) {
+    return { isPlaylist: false, isAlbum: false, isVideoAndPlaylist: false, platform: 'none' };
+  }
+}
+
 export function detectPlatform(url = '') {
   const clean = (url || '').trim();
   if (!clean) {
@@ -125,13 +170,21 @@ export function detectPlatform(url = '') {
     };
   }
 
+  const playlistInfo = isPlaylistUrl(clean);
+
   // YouTube / YouTube Music
   if (host === 'youtube.com' || host === 'youtu.be' || host.endsWith('.youtube.com')) {
     const isMusic = host === 'music.youtube.com';
     const isShorts = u.includes('/shorts/');
+    let displayName = isMusic ? 'YouTube Music' : 'YouTube';
+    if (playlistInfo.isPlaylist && !playlistInfo.isVideoAndPlaylist) {
+      displayName += ' (Playlist)';
+    } else if (playlistInfo.isVideoAndPlaylist) {
+      displayName += ' (Video in Playlist)';
+    }
     return {
       id: 'youtube',
-      name: isMusic ? 'YouTube Music' : 'YouTube',
+      name: displayName,
       color: '#FF0000',
       badgeBg: 'rgba(255, 0, 0, 0.12)',
       badgeBorder: 'rgba(255, 0, 0, 0.35)',
@@ -139,6 +192,9 @@ export function detectPlatform(url = '') {
       isAudioOnly: isMusic,
       isShorts,
       isVideoSupported: !isMusic,
+      isPlaylist: playlistInfo.isPlaylist,
+      isAlbum: false,
+      isVideoAndPlaylist: playlistInfo.isVideoAndPlaylist,
     };
   }
 
@@ -154,20 +210,29 @@ export function detectPlatform(url = '') {
       isAudioOnly: false,
       isVideoSupported: true,
       isShorts: true,
+      isPlaylist: false,
     };
   }
 
   // Spotify
   if (host === 'spotify.com' || host.endsWith('.spotify.com')) {
+    let displayName = 'Spotify';
+    if (playlistInfo.isAlbum) {
+      displayName = 'Spotify (Album)';
+    } else if (playlistInfo.isPlaylist) {
+      displayName = 'Spotify (Playlist)';
+    }
     return {
       id: 'spotify',
-      name: 'Spotify',
+      name: displayName,
       color: '#1DB954',
       badgeBg: 'rgba(29, 185, 84, 0.14)',
       badgeBorder: 'rgba(29, 185, 84, 0.4)',
       isAllowed: true,
       isAudioOnly: true,
       isVideoSupported: false,
+      isPlaylist: playlistInfo.isPlaylist,
+      isAlbum: playlistInfo.isAlbum,
     };
   }
 
@@ -354,7 +419,7 @@ export function validateMediaUrl(targetUrl = '') {
     const isShort = pathname.startsWith('/shorts/');
     const isLive = pathname.startsWith('/live/');
     const isEmbed = pathname.startsWith('/embed/');
-    const isPlaylist = pathname === '/playlist' && (parsed.searchParams.has('list') || search.includes('list='));
+    const isPlaylist = (pathname === '/playlist' || pathname.startsWith('/playlist') || pathname === '/watch') && (parsed.searchParams.has('list') || search.includes('list='));
 
     if (pathname.startsWith('/@') || pathname.startsWith('/channel/') || pathname.startsWith('/c/') || pathname.startsWith('/user/')) {
       return {
