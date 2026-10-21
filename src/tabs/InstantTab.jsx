@@ -31,6 +31,7 @@ export default function InstantTab({
   onNavigateToQueue,
   activeJobs,
   engineStatus,
+  proxySettings,
 }) {
   const [url, setUrl] = useState('');
   const [isInspecting, setIsInspecting] = useState(false);
@@ -101,7 +102,9 @@ export default function InstantTab({
     setIsInspecting(true);
 
     try {
-      const info = await window.itzDownloaderAPI.inspectUrl(clean, {});
+      const info = await window.itzDownloaderAPI.inspectUrl(clean, {
+        proxy: proxySettings?.enabled && proxySettings?.url ? proxySettings.url.trim() : null,
+      });
       setMediaInfo(info);
       setInspectError(null);
       setPlaylistMode('playlist');

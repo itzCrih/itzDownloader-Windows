@@ -2340,6 +2340,86 @@ input:checked + .slider:before {
   text-decoration: underline;
 }
 
+/* Network Proxy Configuration Styles */
+.proxy-status-pill {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.proxy-status-pill.active {
+  background: rgba(46, 160, 67, 0.15);
+  color: #3fb950;
+  border: 1px solid rgba(46, 160, 67, 0.35);
+}
+
+.proxy-status-pill.inactive {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-dim);
+  border: 1px solid var(--border-subtle);
+}
+
+.card-description-text {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.proxy-controls-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.proxy-toggle-row {
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 12px;
+}
+
+.proxy-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.proxy-input-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.proxy-input-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.proxy-input-row input {
+  flex: 1;
+}
+
+.proxy-help-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.proxy-help-hint code {
+  color: var(--gold-primary);
+  font-family: var(--font-mono);
+  background: rgba(230, 180, 34, 0.08);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.btn-primary.btn-saved {
+  background: #238636 !important;
+  color: #fff !important;
+}
+
 /* Reusable buttons */
 .btn-primary, .btn-primary-sm {
   display: inline-flex;

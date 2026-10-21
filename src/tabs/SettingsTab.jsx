@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Settings,
   Folder,
@@ -15,7 +15,9 @@ import {
   ShieldCheck,
   HardDrive,
   Cookie,
-  Gauge
+  Gauge,
+  Globe,
+  Check
 } from 'lucide-react';
 
 export default function SettingsTab({
@@ -40,8 +42,41 @@ export default function SettingsTab({
   onChangeRateLimit,
   defaultCookiesBrowser,
   onChangeCookiesBrowser,
+  proxySettings = { enabled: false, url: '' },
+  onSaveProxySettings,
+  concurrencySetting = 'auto',
+  onChangeConcurrency,
 }) {
   const [isUpdatingYtDlp, setIsUpdatingYtDlp] = useState(false);
+  const [proxyEnabled, setProxyEnabled] = useState(proxySettings?.enabled || false);
+  const [proxyUrl, setProxyUrl] = useState(proxySettings?.url || '');
+  const [proxySaved, setProxySaved] = useState(false);
+
+  useEffect(() => {
+    setProxyEnabled(proxySettings?.enabled || false);
+    setProxyUrl(proxySettings?.url || '');
+  }, [proxySettings]);
+
+  const handleSaveProxy = () => {
+    if (onSaveProxySettings) {
+      onSaveProxySettings({
+        enabled: proxyEnabled,
+        url: proxyUrl.trim(),
+      });
+      setProxySaved(true);
+      setTimeout(() => setProxySaved(false), 2200);
+    }
+  };
+
+  const handleToggleProxy = (val) => {
+    setProxyEnabled(val);
+    if (onSaveProxySettings) {
+      onSaveProxySettings({
+        enabled: val,
+        url: proxyUrl.trim(),
+      });
+    }
+  };
 
   const handleUpdateYtDlpClick = async () => {
     setIsUpdatingYtDlp(true);
@@ -267,6 +302,65 @@ export default function SettingsTab({
         </div>
       </div>
 
+      {/* Network Proxy Configuration */}
+      <div className="settings-card">
+        <div className="card-inner-header">
+          <div className="card-title-group">
+            <Globe size={16} color="#e6b422" />
+            <span className="card-title">Network Proxy Configuration</span>
+          </div>
+          <span className={`proxy-status-pill ${proxyEnabled ? 'active' : 'inactive'}`}>
+            {proxyEnabled ? 'PROXY ACTIVE' : 'DISABLED'}
+          </span>
+        </div>
+
+        <p className="card-description-text">
+          Route queries and video downloads through an HTTP, HTTPS, or SOCKS5 proxy to bypass regional restrictions or IP rate limits.
+        </p>
+
+        <div className="proxy-controls-wrap">
+          <div className="pref-item proxy-toggle-row">
+            <div>
+              <div className="pref-name">Enable Network Proxy</div>
+              <div className="pref-desc">Activate proxy routing for yt-dlp inspection and video streams.</div>
+            </div>
+            <label className="switch">
+              <input
+                type="checkbox"
+                checked={proxyEnabled}
+                onChange={(e) => handleToggleProxy(e.target.checked)}
+              />
+              <span className="slider round"></span>
+            </label>
+          </div>
+
+          <div className="proxy-input-group">
+            <label className="proxy-input-label">Proxy Server URL</label>
+            <div className="proxy-input-row">
+              <input
+                type="text"
+                className="form-input form-mono"
+                placeholder="socks5://127.0.0.1:1080 or http://user:pass@127.0.0.1:8080"
+                value={proxyUrl}
+                onChange={(e) => setProxyUrl(e.target.value)}
+                disabled={!proxyEnabled}
+              />
+              <button
+                className={`btn-primary ${proxySaved ? 'btn-saved' : ''}`}
+                onClick={handleSaveProxy}
+                disabled={!proxyEnabled && !proxyUrl}
+              >
+                {proxySaved ? <CheckCircle2 size={14} /> : <Check size={14} />}
+                <span>{proxySaved ? 'Saved!' : 'Save Proxy'}</span>
+              </button>
+            </div>
+            <div className="proxy-help-hint">
+              Supported protocols: <code>http://</code>, <code>https://</code>, <code>socks4://</code>, <code>socks5://</code> (Default: empty / disabled).
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Application Preferences */}
       <div className="settings-card">
         <div className="card-inner-header">
@@ -277,6 +371,23 @@ export default function SettingsTab({
         </div>
 
         <div className="prefs-list">
+          {/* Parallel Queue Downloads */}
+          <div className="pref-item">
+            <div>
+              <div className="pref-name">Parallel Queue Downloads</div>
+              <div className="pref-desc">Simultaneous downloads in queue/playlist scaled automatically to device hardware.</div>
+            </div>
+            <select
+              className="form-select-sm"
+              value={concurrencySetting}
+              onChange={(e) => onChangeConcurrency && onChangeConcurrency(e.target.value)}
+            >
+              <option value="auto">Auto (Hardware Scaled - Recommended)</option>
+              <option value="1">1 Video (Low-End / Battery Saver)</option>
+              <option value="2">2 Videos (Balanced Concurrency)</option>
+              <option value="3">3 Videos (High Performance)</option>
+            </select>
+          </div>
           {/* Smooth Animations */}
           <div className="pref-item">
             <div>

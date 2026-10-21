@@ -56,11 +56,59 @@ export default function App() {
 
   const [updateState, setUpdateState] = useState({
     status: 'idle',
-    currentVersion: '1.2.6',
-    latestVersion: '1.2.6',
+    currentVersion: '1.2.7',
+    latestVersion: '1.2.7',
     downloadPercent: 0,
     error: null,
   });
+
+  const [proxySettings, setProxySettings] = useState(() => {
+    try {
+      return {
+        enabled: localStorage.getItem('itzdownloader_proxy_enabled') === 'true',
+        url: localStorage.getItem('itzdownloader_proxy_url') || '',
+      };
+    } catch {
+      return { enabled: false, url: '' };
+    }
+  });
+
+  const handleSaveProxySettings = ({ enabled, url }) => {
+    const cleanUrl = (url || '').trim();
+    const next = { enabled: !!enabled, url: cleanUrl };
+    setProxySettings(next);
+    try {
+      localStorage.setItem('itzdownloader_proxy_enabled', next.enabled ? 'true' : 'false');
+      localStorage.setItem('itzdownloader_proxy_url', next.url);
+    } catch {}
+    showToast(next.enabled ? `Network proxy enabled: ${next.url}` : 'Network proxy disabled.', 'info');
+  };
+
+  const [concurrencySetting, setConcurrencySetting] = useState(() => {
+    try {
+      return localStorage.getItem('itzdownloader_concurrency') || 'auto';
+    } catch {
+      return 'auto';
+    }
+  });
+
+  const handleConcurrencyChange = (val) => {
+    setConcurrencySetting(val);
+    try {
+      localStorage.setItem('itzdownloader_concurrency', val);
+    } catch {}
+    showToast(`Parallel downloads set to: ${val === 'auto' ? 'Auto (Hardware Scaled)' : val + ' simultaneous'}`, 'info');
+  };
+
+  const getEffectiveConcurrency = () => {
+    if (concurrencySetting === '1') return 1;
+    if (concurrencySetting === '2') return 2;
+    if (concurrencySetting === '3') return 3;
+    const cores = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) ? navigator.hardwareConcurrency : 4;
+    if (cores <= 2) return 1;
+    if (cores <= 4) return 2;
+    return 3;
+  };
 
   // Toast notification helper
   const showToast = (message, type = 'info') => {
@@ -92,6 +140,7 @@ export default function App() {
   }, [jobs]);
 
   const startNextPlaylistItemRef = useRef();
+  const pumpPlaylistQueueRef = useRef();
 
   const handleJobErrorFallback = (playlistJobId, subJobId, errorMessage) => {
     const currentJobs = jobsRef.current;
@@ -106,31 +155,107 @@ export default function App() {
       status: 'error',
       error: errorMessage,
     };
-    const nextQueuedIdx = updatedItems.findIndex((it) => it.status === 'queued');
-    if (nextQueuedIdx !== -1) {
-      updatedItems[nextQueuedIdx] = {
-        ...updatedItems[nextQueuedIdx],
-        status: 'downloading',
-      };
-    }
-    const allDone = updatedItems.every((it) => it.status === 'completed' || it.status === 'error' || it.status === 'canceled');
+    const allDone = updatedItems.every(
+      (it) => it.status === 'completed' || it.status === 'error' || it.status === 'canceled'
+    );
+    const completedCount = updatedItems.filter((it) => it.status === 'completed').length;
     const updatedPlaylistJob = {
       ...playlistJob,
       status: allDone ? 'completed' : 'downloading',
-      activeItemIndex: nextQueuedIdx !== -1 ? nextQueuedIdx : itemIdx,
-      activeSubJobId: nextQueuedIdx !== -1 ? updatedItems[nextQueuedIdx].subJobId : null,
+      completedCount,
       items: updatedItems,
     };
     const nextJobs = currentJobs.map((j) => (j.jobId === playlistJobId ? updatedPlaylistJob : j));
     jobsRef.current = nextJobs;
     setJobs(nextJobs);
 
-    if (nextQueuedIdx !== -1 && startNextPlaylistItemRef.current) {
+    if (!allDone && pumpPlaylistQueueRef.current) {
       setTimeout(() => {
-        startNextPlaylistItemRef.current(playlistJobId, nextQueuedIdx, updatedPlaylistJob);
-      }, 100);
+        pumpPlaylistQueueRef.current(playlistJobId);
+      }, 80);
     }
   };
+
+  const pumpPlaylistQueue = (playlistJobId) => {
+    const currentJobs = jobsRef.current;
+    const playlistJob = currentJobs.find((j) => j.jobId === playlistJobId && Array.isArray(j.items));
+    if (!playlistJob) return;
+
+    if (playlistJob.status === 'canceled' || playlistJob.status === 'completed') return;
+
+    // Active items currently downloading or converting
+    const activeItems = playlistJob.items.filter(
+      (it) => it.status === 'downloading' || it.status === 'converting'
+    );
+    const maxConcurrency = getEffectiveConcurrency();
+    const availableSlots = maxConcurrency - activeItems.length;
+
+    if (availableSlots <= 0) return;
+
+    // Pick next available queued items up to availableSlots
+    const queuedIndices = [];
+    for (let i = 0; i < playlistJob.items.length; i++) {
+      if (playlistJob.items[i].status === 'queued') {
+        queuedIndices.push(i);
+        if (queuedIndices.length >= availableSlots) break;
+      }
+    }
+
+    if (queuedIndices.length === 0) {
+      const allDone = playlistJob.items.every(
+        (it) => it.status === 'completed' || it.status === 'error' || it.status === 'canceled'
+      );
+      if (allDone && playlistJob.status !== 'completed' && playlistJob.status !== 'canceled') {
+        const completedCount = playlistJob.items.filter((it) => it.status === 'completed').length;
+        const updatedPlaylistJob = {
+          ...playlistJob,
+          status: 'completed',
+          completedCount,
+          progress: {
+            percent: 100,
+            speed: null,
+            eta: null,
+          },
+        };
+        const nextJobs = currentJobs.map((j) => (j.jobId === playlistJobId ? updatedPlaylistJob : j));
+        jobsRef.current = nextJobs;
+        setJobs(nextJobs);
+        if (soundEnabled) playCompletionChime();
+        showToast(`Playlist finished: "${playlistJob.title}"!`, 'success');
+      }
+      return;
+    }
+
+    // Mark queued items as downloading immediately
+    const updatedItems = [...playlistJob.items];
+    queuedIndices.forEach((idx) => {
+      updatedItems[idx] = {
+        ...updatedItems[idx],
+        status: 'downloading',
+      };
+    });
+
+    const updatedPlaylistJob = {
+      ...playlistJob,
+      status: 'downloading',
+      items: updatedItems,
+      activeItemIndex: queuedIndices[0],
+      activeSubJobId: updatedItems[queuedIndices[0]].subJobId,
+    };
+    const nextJobs = currentJobs.map((j) => (j.jobId === playlistJobId ? updatedPlaylistJob : j));
+    jobsRef.current = nextJobs;
+    setJobs(nextJobs);
+
+    // Stagger start execution with 150ms gap so processes launch smoothly
+    queuedIndices.forEach((idx, offset) => {
+      setTimeout(() => {
+        if (startNextPlaylistItemRef.current) {
+          startNextPlaylistItemRef.current(playlistJobId, idx, updatedPlaylistJob);
+        }
+      }, offset * 150);
+    });
+  };
+  pumpPlaylistQueueRef.current = pumpPlaylistQueue;
 
   const startNextPlaylistItem = async (playlistJobId, itemIndex, explicitPlaylistJob = null) => {
     const playlistJob = explicitPlaylistJob || jobsRef.current.find((j) => j.jobId === playlistJobId);
@@ -151,6 +276,7 @@ export default function App() {
       customOptions: playlistJob.customOptions,
       globalRateLimit,
       cookiesBrowser: defaultCookiesBrowser,
+      proxy: playlistJob.proxy || (proxySettings.enabled ? proxySettings.url : null),
       isPlaylist: false,
     };
 
@@ -166,7 +292,7 @@ export default function App() {
         if (currItem && currItem.status === 'downloading') {
           handleJobErrorFallback(playlistJobId, item.subJobId, e.message || 'Error starting download');
         }
-      }, 500);
+      }, 300);
     }
   };
   startNextPlaylistItemRef.current = startNextPlaylistItem;
@@ -198,8 +324,17 @@ export default function App() {
                 progress: data,
               };
               const completedCount = updatedItems.filter((it) => it.status === 'completed').length;
-              const currentItemPercent = data.percent || 0;
-              const overallPercent = Math.min(99.9, ((completedCount * 100) + currentItemPercent) / Math.max(1, j.totalItems));
+              
+              // Sum up total progress points across all items for accurate multi-download bar
+              const totalProgressPoints = updatedItems.reduce((acc, it) => {
+                if (it.status === 'completed') return acc + 100;
+                if (it.status === 'downloading' || it.status === 'converting') {
+                  return acc + (it.progress?.percent || 0);
+                }
+                return acc;
+              }, 0);
+              const overallPercent = Math.min(99.9, totalProgressPoints / Math.max(1, j.totalItems));
+
               return {
                 ...j,
                 status: 'downloading',
@@ -243,15 +378,6 @@ export default function App() {
           progress: { percent: 100 },
         };
         const completedCount = updatedItems.filter((it) => it.status === 'completed').length;
-        const nextQueuedIdx = updatedItems.findIndex((it) => it.status === 'queued');
-
-        if (nextQueuedIdx !== -1) {
-          updatedItems[nextQueuedIdx] = {
-            ...updatedItems[nextQueuedIdx],
-            status: 'downloading',
-          };
-        }
-
         const allDone = updatedItems.every(
           (it) => it.status === 'completed' || it.status === 'error' || it.status === 'canceled'
         );
@@ -260,8 +386,6 @@ export default function App() {
           ...playlistJob,
           status: allDone ? 'completed' : 'downloading',
           completedCount,
-          activeItemIndex: nextQueuedIdx !== -1 ? nextQueuedIdx : itemIdx,
-          activeSubJobId: nextQueuedIdx !== -1 ? updatedItems[nextQueuedIdx].subJobId : null,
           items: updatedItems,
           progress: {
             percent: Math.min(100, Math.round((completedCount / Math.max(1, playlistJob.totalItems)) * 100)),
@@ -274,15 +398,13 @@ export default function App() {
         jobsRef.current = nextJobs;
         setJobs(nextJobs);
 
-        if (nextQueuedIdx !== -1) {
-          setTimeout(() => {
-            if (startNextPlaylistItemRef.current) {
-              startNextPlaylistItemRef.current(playlistJob.jobId, nextQueuedIdx, updatedPlaylistJob);
-            }
-          }, 100);
-        } else {
+        if (allDone) {
           if (soundEnabled) playCompletionChime();
           showToast(`Playlist finished: "${playlistJob.title}"!`, 'success');
+        } else if (pumpPlaylistQueueRef.current) {
+          setTimeout(() => {
+            pumpPlaylistQueueRef.current(playlistJob.jobId);
+          }, 80);
         }
         return;
       }
@@ -320,24 +442,16 @@ export default function App() {
           status: 'error',
           error: data.error,
         };
-        const nextQueuedIdx = updatedItems.findIndex((it) => it.status === 'queued');
-
-        if (nextQueuedIdx !== -1) {
-          updatedItems[nextQueuedIdx] = {
-            ...updatedItems[nextQueuedIdx],
-            status: 'downloading',
-          };
-        }
 
         const allDone = updatedItems.every(
           (it) => it.status === 'completed' || it.status === 'error' || it.status === 'canceled'
         );
+        const completedCount = updatedItems.filter((it) => it.status === 'completed').length;
 
         const updatedPlaylistJob = {
           ...playlistJob,
           status: allDone ? 'completed' : 'downloading',
-          activeItemIndex: nextQueuedIdx !== -1 ? nextQueuedIdx : itemIdx,
-          activeSubJobId: nextQueuedIdx !== -1 ? updatedItems[nextQueuedIdx].subJobId : null,
+          completedCount,
           items: updatedItems,
         };
 
@@ -345,12 +459,10 @@ export default function App() {
         jobsRef.current = nextJobs;
         setJobs(nextJobs);
 
-        if (nextQueuedIdx !== -1) {
+        if (!allDone && pumpPlaylistQueueRef.current) {
           setTimeout(() => {
-            if (startNextPlaylistItemRef.current) {
-              startNextPlaylistItemRef.current(playlistJob.jobId, nextQueuedIdx, updatedPlaylistJob);
-            }
-          }, 100);
+            pumpPlaylistQueueRef.current(playlistJob.jobId);
+          }, 80);
           showToast(`Skipped item with error: ${data.error}`, 'warning');
         } else {
           showToast(`Download error: ${data.error}`, 'error');
@@ -462,6 +574,8 @@ export default function App() {
   };
 
   const handleAddJob = async (jobConfig) => {
+    const effectiveProxy = proxySettings?.enabled && proxySettings?.url ? proxySettings.url.trim() : null;
+
     if (jobConfig.isPlaylist) {
       const playlistJobId = jobConfig.jobId || `pl_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
       const entries = jobConfig.entries || [];
@@ -475,7 +589,7 @@ export default function App() {
         thumbnail: entry.thumbnail,
         url: entry.url,
         targetSearch: entry.targetSearch,
-        status: idx === 0 ? 'downloading' : 'queued',
+        status: 'queued',
         progress: { percent: 0, speed: null, eta: null },
         logs: [],
         outputPath: null,
@@ -489,11 +603,10 @@ export default function App() {
         isPlaylist: true,
         globalRateLimit,
         cookiesBrowser: defaultCookiesBrowser,
+        proxy: effectiveProxy,
         status: 'downloading',
         totalItems: items.length,
         completedCount: 0,
-        activeItemIndex: 0,
-        activeSubJobId: items[0]?.subJobId,
         progress: { percent: 0, speed: null, eta: null },
         items,
         logs: [],
@@ -505,8 +618,8 @@ export default function App() {
       const unit = getItemUnit(fullPlaylistConfig.preset, fullPlaylistConfig.customOptions);
       showToast(`Queued playlist: "${fullPlaylistConfig.title}" (${items.length} ${unit})`, 'success');
 
-      if (items.length > 0) {
-        startNextPlaylistItem(playlistJobId, 0, fullPlaylistConfig);
+      if (items.length > 0 && pumpPlaylistQueueRef.current) {
+        pumpPlaylistQueueRef.current(playlistJobId);
       }
       return;
     }
@@ -515,6 +628,7 @@ export default function App() {
       ...jobConfig,
       globalRateLimit,
       cookiesBrowser: defaultCookiesBrowser,
+      proxy: effectiveProxy,
       status: 'downloading',
       progress: { percent: 0, speed: null, eta: null },
       logs: [],
@@ -532,8 +646,12 @@ export default function App() {
   const handleCancelJob = (jobId) => {
     const job = jobs.find((j) => j.jobId === jobId);
     if (job?.isPlaylist) {
-      if (job.activeSubJobId && window.itzDownloaderAPI) {
-        window.itzDownloaderAPI.cancelJob(job.activeSubJobId);
+      if (Array.isArray(job.items) && window.itzDownloaderAPI) {
+        job.items.forEach((it) => {
+          if (it.status === 'downloading' || it.status === 'converting') {
+            window.itzDownloaderAPI.cancelJob(it.subJobId);
+          }
+        });
       }
       setJobs((prev) =>
         prev.map((j) => {
@@ -566,7 +684,7 @@ export default function App() {
     const itemIdx = playlistJob.items.findIndex((it) => it.subJobId === subJobId);
     if (itemIdx === -1) return;
 
-    const isCurrentlyDownloading = playlistJob.items[itemIdx].status === 'downloading';
+    const isCurrentlyDownloading = playlistJob.items[itemIdx].status === 'downloading' || playlistJob.items[itemIdx].status === 'converting';
     if (isCurrentlyDownloading && window.itzDownloaderAPI) {
       window.itzDownloaderAPI.cancelJob(subJobId);
     }
@@ -576,17 +694,6 @@ export default function App() {
       ...updatedItems[itemIdx],
       status: 'canceled',
     };
-
-    let nextQueuedIdx = -1;
-    if (isCurrentlyDownloading) {
-      nextQueuedIdx = updatedItems.findIndex((it) => it.status === 'queued');
-      if (nextQueuedIdx !== -1) {
-        updatedItems[nextQueuedIdx] = {
-          ...updatedItems[nextQueuedIdx],
-          status: 'downloading',
-        };
-      }
-    }
 
     const allDone = updatedItems.every(
       (it) => it.status === 'completed' || it.status === 'error' || it.status === 'canceled'
@@ -602,14 +709,13 @@ export default function App() {
     jobsRef.current = nextJobs;
     setJobs(nextJobs);
 
-    if (nextQueuedIdx !== -1) {
-      setTimeout(() => {
-        if (startNextPlaylistItemRef.current) {
-          startNextPlaylistItemRef.current(playlistJobId, nextQueuedIdx, updatedPlaylistJob);
-        }
-      }, 100);
-    }
     showToast('Item download canceled.', 'info');
+
+    if (isCurrentlyDownloading && !allDone && pumpPlaylistQueueRef.current) {
+      setTimeout(() => {
+        pumpPlaylistQueueRef.current(playlistJobId);
+      }, 80);
+    }
   };
 
   const handleClearCompleted = () => {
@@ -776,6 +882,7 @@ export default function App() {
                 onNavigateToQueue={handleNavigateToQueue}
                 activeJobs={jobs}
                 engineStatus={engineStatus}
+                proxySettings={proxySettings}
               />
             )}
 
@@ -788,6 +895,7 @@ export default function App() {
                 defaultOutputDir={defaultOutputDir}
                 onNavigateToQueue={handleNavigateToQueue}
                 engineStatus={engineStatus}
+                proxySettings={proxySettings}
               />
             )}
 
@@ -833,6 +941,10 @@ export default function App() {
                   setDefaultCookiesBrowser(val);
                   localStorage.setItem('itzdownloader_cookies', val);
                 }}
+                proxySettings={proxySettings}
+                onSaveProxySettings={handleSaveProxySettings}
+                concurrencySetting={concurrencySetting}
+                onChangeConcurrency={handleConcurrencyChange}
                 updateState={updateState}
                 onCheckForUpdates={handleCheckForUpdates}
                 onInstallUpdate={handleInstallUpdate}
@@ -865,7 +977,7 @@ export default function App() {
           </div>
 
           <div>
-            <span style={{ fontFamily: 'var(--font-mono)' }}>itzDownloader Desktop v1.2.6</span>
+            <span style={{ fontFamily: 'var(--font-mono)' }}>itzDownloader Desktop v1.2.7</span>
           </div>
         </footer>
       </div>
