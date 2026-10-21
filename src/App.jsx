@@ -56,8 +56,8 @@ export default function App() {
 
   const [updateState, setUpdateState] = useState({
     status: 'idle',
-    currentVersion: '1.2.5',
-    latestVersion: '1.2.5',
+    currentVersion: '1.2.6',
+    latestVersion: '1.2.6',
     downloadPercent: 0,
     error: null,
   });
@@ -91,6 +91,47 @@ export default function App() {
     jobsRef.current = jobs;
   }, [jobs]);
 
+  const startNextPlaylistItemRef = useRef();
+
+  const handleJobErrorFallback = (playlistJobId, subJobId, errorMessage) => {
+    const currentJobs = jobsRef.current;
+    const playlistJob = currentJobs.find((j) => j.jobId === playlistJobId && Array.isArray(j.items));
+    if (!playlistJob) return;
+    const itemIdx = playlistJob.items.findIndex((it) => it.subJobId === subJobId);
+    if (itemIdx === -1) return;
+
+    const updatedItems = [...playlistJob.items];
+    updatedItems[itemIdx] = {
+      ...updatedItems[itemIdx],
+      status: 'error',
+      error: errorMessage,
+    };
+    const nextQueuedIdx = updatedItems.findIndex((it) => it.status === 'queued');
+    if (nextQueuedIdx !== -1) {
+      updatedItems[nextQueuedIdx] = {
+        ...updatedItems[nextQueuedIdx],
+        status: 'downloading',
+      };
+    }
+    const allDone = updatedItems.every((it) => it.status === 'completed' || it.status === 'error' || it.status === 'canceled');
+    const updatedPlaylistJob = {
+      ...playlistJob,
+      status: allDone ? 'completed' : 'downloading',
+      activeItemIndex: nextQueuedIdx !== -1 ? nextQueuedIdx : itemIdx,
+      activeSubJobId: nextQueuedIdx !== -1 ? updatedItems[nextQueuedIdx].subJobId : null,
+      items: updatedItems,
+    };
+    const nextJobs = currentJobs.map((j) => (j.jobId === playlistJobId ? updatedPlaylistJob : j));
+    jobsRef.current = nextJobs;
+    setJobs(nextJobs);
+
+    if (nextQueuedIdx !== -1 && startNextPlaylistItemRef.current) {
+      setTimeout(() => {
+        startNextPlaylistItemRef.current(playlistJobId, nextQueuedIdx, updatedPlaylistJob);
+      }, 100);
+    }
+  };
+
   const startNextPlaylistItem = async (playlistJobId, itemIndex, explicitPlaylistJob = null) => {
     const playlistJob = explicitPlaylistJob || jobsRef.current.find((j) => j.jobId === playlistJobId);
     if (!playlistJob || !playlistJob.items) return;
@@ -119,9 +160,16 @@ export default function App() {
       }
     } catch (e) {
       console.error(`[startNextPlaylistItem] Failed to start sub-job ${item.subJobId}:`, e);
-      // Handled via onJobError
+      setTimeout(() => {
+        const curr = jobsRef.current.find((j) => j.jobId === playlistJobId);
+        const currItem = curr?.items?.[itemIndex];
+        if (currItem && currItem.status === 'downloading') {
+          handleJobErrorFallback(playlistJobId, item.subJobId, e.message || 'Error starting download');
+        }
+      }, 500);
     }
   };
+  startNextPlaylistItemRef.current = startNextPlaylistItem;
 
   // Mandatory initial startup probe & auto-engine preparation
   useEffect(() => {
@@ -138,8 +186,8 @@ export default function App() {
 
     // Subscriptions
     const unsubProgress = window.itzDownloaderAPI.onJobProgress((data) => {
-      setJobs((prev) =>
-        prev.map((j) => {
+      setJobs((prev) => {
+        const next = prev.map((j) => {
           if (j.isPlaylist && Array.isArray(j.items)) {
             const itemIdx = j.items.findIndex((it) => it.subJobId === data.jobId);
             if (itemIdx !== -1) {
@@ -172,155 +220,154 @@ export default function App() {
             return { ...j, status: data.status, progress: data };
           }
           return j;
-        })
-      );
-    });
-
-    const unsubComplete = window.itzDownloaderAPI.onJobComplete((data) => {
-      let nextPlaylistToStart = null;
-      let nextPlaylistJobObj = null;
-      let playlistFinishedTitle = null;
-
-      setJobs((prev) => {
-        const next = prev.map((j) => {
-          if (j.isPlaylist && Array.isArray(j.items)) {
-            const itemIdx = j.items.findIndex((it) => it.subJobId === data.jobId);
-            if (itemIdx !== -1) {
-              const updatedItems = [...j.items];
-              updatedItems[itemIdx] = {
-                ...updatedItems[itemIdx],
-                status: 'completed',
-                outputPath: data.outputPath,
-                outputSize: data.outputSize,
-                progress: { percent: 100 },
-              };
-              const completedCount = updatedItems.filter((it) => it.status === 'completed').length;
-              const nextQueuedIdx = updatedItems.findIndex((it) => it.status === 'queued');
-
-              if (nextQueuedIdx !== -1) {
-                updatedItems[nextQueuedIdx] = {
-                  ...updatedItems[nextQueuedIdx],
-                  status: 'downloading',
-                };
-                nextPlaylistToStart = { playlistId: j.jobId, nextIdx: nextQueuedIdx };
-              } else {
-                playlistFinishedTitle = j.title;
-              }
-
-              const allDone = updatedItems.every((it) => it.status === 'completed' || it.status === 'error' || it.status === 'canceled');
-
-              const updatedJob = {
-                ...j,
-                status: allDone ? 'completed' : 'downloading',
-                completedCount,
-                activeItemIndex: nextQueuedIdx !== -1 ? nextQueuedIdx : itemIdx,
-                activeSubJobId: nextQueuedIdx !== -1 ? updatedItems[nextQueuedIdx].subJobId : null,
-                items: updatedItems,
-                progress: {
-                  percent: Math.min(100, Math.round((completedCount / Math.max(1, j.totalItems)) * 100)),
-                  speed: null,
-                  eta: null,
-                },
-              };
-
-              if (nextQueuedIdx !== -1) {
-                nextPlaylistJobObj = updatedJob;
-              }
-              return updatedJob;
-            }
-          }
-
-          if (j.jobId === data.jobId) {
-            return { ...j, status: 'completed', outputSize: data.outputSize, outputPath: data.outputPath };
-          }
-          return j;
         });
         jobsRef.current = next;
         return next;
       });
+    });
 
-      if (nextPlaylistToStart) {
-        startNextPlaylistItem(nextPlaylistToStart.playlistId, nextPlaylistToStart.nextIdx, nextPlaylistJobObj);
-      } else if (playlistFinishedTitle) {
-        if (soundEnabled) playCompletionChime();
-        showToast(`Playlist finished: "${playlistFinishedTitle}"!`, 'success');
-      } else {
-        if (soundEnabled) playCompletionChime();
-        showToast('Download finished successfully!', 'success');
+    const unsubComplete = window.itzDownloaderAPI.onJobComplete((data) => {
+      const currentJobs = jobsRef.current;
+      const playlistJob = currentJobs.find(
+        (j) => j.isPlaylist && Array.isArray(j.items) && j.items.some((it) => it.subJobId === data.jobId)
+      );
+
+      if (playlistJob) {
+        const itemIdx = playlistJob.items.findIndex((it) => it.subJobId === data.jobId);
+        const updatedItems = [...playlistJob.items];
+        updatedItems[itemIdx] = {
+          ...updatedItems[itemIdx],
+          status: 'completed',
+          outputPath: data.outputPath,
+          outputSize: data.outputSize,
+          progress: { percent: 100 },
+        };
+        const completedCount = updatedItems.filter((it) => it.status === 'completed').length;
+        const nextQueuedIdx = updatedItems.findIndex((it) => it.status === 'queued');
+
+        if (nextQueuedIdx !== -1) {
+          updatedItems[nextQueuedIdx] = {
+            ...updatedItems[nextQueuedIdx],
+            status: 'downloading',
+          };
+        }
+
+        const allDone = updatedItems.every(
+          (it) => it.status === 'completed' || it.status === 'error' || it.status === 'canceled'
+        );
+
+        const updatedPlaylistJob = {
+          ...playlistJob,
+          status: allDone ? 'completed' : 'downloading',
+          completedCount,
+          activeItemIndex: nextQueuedIdx !== -1 ? nextQueuedIdx : itemIdx,
+          activeSubJobId: nextQueuedIdx !== -1 ? updatedItems[nextQueuedIdx].subJobId : null,
+          items: updatedItems,
+          progress: {
+            percent: Math.min(100, Math.round((completedCount / Math.max(1, playlistJob.totalItems)) * 100)),
+            speed: null,
+            eta: null,
+          },
+        };
+
+        const nextJobs = currentJobs.map((j) => (j.jobId === playlistJob.jobId ? updatedPlaylistJob : j));
+        jobsRef.current = nextJobs;
+        setJobs(nextJobs);
+
+        if (nextQueuedIdx !== -1) {
+          setTimeout(() => {
+            if (startNextPlaylistItemRef.current) {
+              startNextPlaylistItemRef.current(playlistJob.jobId, nextQueuedIdx, updatedPlaylistJob);
+            }
+          }, 100);
+        } else {
+          if (soundEnabled) playCompletionChime();
+          showToast(`Playlist finished: "${playlistJob.title}"!`, 'success');
+        }
+        return;
       }
+
+      // Single non-playlist job completion
+      const nextJobs = currentJobs.map((j) =>
+        j.jobId === data.jobId ? { ...j, status: 'completed', outputSize: data.outputSize, outputPath: data.outputPath } : j
+      );
+      jobsRef.current = nextJobs;
+      setJobs(nextJobs);
+
+      if (soundEnabled) playCompletionChime();
+      showToast('Download finished successfully!', 'success');
     });
 
     const unsubCanceled = window.itzDownloaderAPI.onJobCanceled((data) => {
-      setJobs((prev) => {
-        const next = prev.filter((j) => j.jobId !== data.jobId);
-        jobsRef.current = next;
-        return next;
-      });
+      const currentJobs = jobsRef.current;
+      const nextJobs = currentJobs.filter((j) => j.jobId !== data.jobId);
+      jobsRef.current = nextJobs;
+      setJobs(nextJobs);
       showToast('Download canceled and partial files cleaned.', 'info');
     });
 
     const unsubError = window.itzDownloaderAPI.onJobError((data) => {
-      let nextPlaylistToStart = null;
-      let nextPlaylistJobObj = null;
+      const currentJobs = jobsRef.current;
+      const playlistJob = currentJobs.find(
+        (j) => j.isPlaylist && Array.isArray(j.items) && j.items.some((it) => it.subJobId === data.jobId)
+      );
 
-      setJobs((prev) => {
-        const next = prev.map((j) => {
-          if (j.isPlaylist && Array.isArray(j.items)) {
-            const itemIdx = j.items.findIndex((it) => it.subJobId === data.jobId);
-            if (itemIdx !== -1) {
-              const updatedItems = [...j.items];
-              updatedItems[itemIdx] = {
-                ...updatedItems[itemIdx],
-                status: 'error',
-                error: data.error,
-              };
-              const nextQueuedIdx = updatedItems.findIndex((it) => it.status === 'queued');
+      if (playlistJob) {
+        const itemIdx = playlistJob.items.findIndex((it) => it.subJobId === data.jobId);
+        const updatedItems = [...playlistJob.items];
+        updatedItems[itemIdx] = {
+          ...updatedItems[itemIdx],
+          status: 'error',
+          error: data.error,
+        };
+        const nextQueuedIdx = updatedItems.findIndex((it) => it.status === 'queued');
 
-              if (nextQueuedIdx !== -1) {
-                updatedItems[nextQueuedIdx] = {
-                  ...updatedItems[nextQueuedIdx],
-                  status: 'downloading',
-                };
-                nextPlaylistToStart = { playlistId: j.jobId, nextIdx: nextQueuedIdx };
-              }
+        if (nextQueuedIdx !== -1) {
+          updatedItems[nextQueuedIdx] = {
+            ...updatedItems[nextQueuedIdx],
+            status: 'downloading',
+          };
+        }
 
-              const allDone = updatedItems.every((it) => it.status === 'completed' || it.status === 'error' || it.status === 'canceled');
+        const allDone = updatedItems.every(
+          (it) => it.status === 'completed' || it.status === 'error' || it.status === 'canceled'
+        );
 
-              const updatedJob = {
-                ...j,
-                status: allDone ? 'completed' : 'downloading',
-                activeItemIndex: nextQueuedIdx !== -1 ? nextQueuedIdx : itemIdx,
-                activeSubJobId: nextQueuedIdx !== -1 ? updatedItems[nextQueuedIdx].subJobId : null,
-                items: updatedItems,
-              };
+        const updatedPlaylistJob = {
+          ...playlistJob,
+          status: allDone ? 'completed' : 'downloading',
+          activeItemIndex: nextQueuedIdx !== -1 ? nextQueuedIdx : itemIdx,
+          activeSubJobId: nextQueuedIdx !== -1 ? updatedItems[nextQueuedIdx].subJobId : null,
+          items: updatedItems,
+        };
 
-              if (nextQueuedIdx !== -1) {
-                nextPlaylistJobObj = updatedJob;
-              }
-              return updatedJob;
+        const nextJobs = currentJobs.map((j) => (j.jobId === playlistJob.jobId ? updatedPlaylistJob : j));
+        jobsRef.current = nextJobs;
+        setJobs(nextJobs);
+
+        if (nextQueuedIdx !== -1) {
+          setTimeout(() => {
+            if (startNextPlaylistItemRef.current) {
+              startNextPlaylistItemRef.current(playlistJob.jobId, nextQueuedIdx, updatedPlaylistJob);
             }
-          }
-
-          if (j.jobId === data.jobId) {
-            return { ...j, status: 'error', error: data.error };
-          }
-          return j;
-        });
-        jobsRef.current = next;
-        return next;
-      });
-
-      if (nextPlaylistToStart) {
-        startNextPlaylistItem(nextPlaylistToStart.playlistId, nextPlaylistToStart.nextIdx, nextPlaylistJobObj);
-        showToast(`Skipped item with error: ${data.error}`, 'warning');
-      } else {
-        showToast(`Download error: ${data.error}`, 'error');
+          }, 100);
+          showToast(`Skipped item with error: ${data.error}`, 'warning');
+        } else {
+          showToast(`Download error: ${data.error}`, 'error');
+        }
+        return;
       }
+
+      const nextJobs = currentJobs.map((j) => (j.jobId === data.jobId ? { ...j, status: 'error', error: data.error } : j));
+      jobsRef.current = nextJobs;
+      setJobs(nextJobs);
+
+      showToast(`Download error: ${data.error}`, 'error');
     });
 
     const unsubLog = window.itzDownloaderAPI.onJobLog((data) => {
-      setJobs((prev) =>
-        prev.map((j) => {
+      setJobs((prev) => {
+        const next = prev.map((j) => {
           if (j.isPlaylist && Array.isArray(j.items)) {
             const itemIdx = j.items.findIndex((it) => it.subJobId === data.jobId);
             if (itemIdx !== -1) {
@@ -351,8 +398,10 @@ export default function App() {
             return { ...j, logs };
           }
           return j;
-        })
-      );
+        });
+        jobsRef.current = next;
+        return next;
+      });
     });
 
     const unsubEngineDownload = window.itzDownloaderAPI.onEngineDownloadProgress((data) => {
@@ -510,57 +559,55 @@ export default function App() {
   };
 
   const handleCancelPlaylistItem = (playlistJobId, subJobId) => {
-    let nextToStart = null;
-    let nextJobObj = null;
+    const currentJobs = jobsRef.current;
+    const playlistJob = currentJobs.find((j) => j.jobId === playlistJobId && Array.isArray(j.items));
+    if (!playlistJob) return;
 
-    setJobs((prev) => {
-      const next = prev.map((j) => {
-        if (j.jobId === playlistJobId && Array.isArray(j.items)) {
-          const itemIdx = j.items.findIndex((it) => it.subJobId === subJobId);
-          if (itemIdx === -1) return j;
+    const itemIdx = playlistJob.items.findIndex((it) => it.subJobId === subJobId);
+    if (itemIdx === -1) return;
 
-          const isCurrentlyDownloading = j.items[itemIdx].status === 'downloading';
-          if (isCurrentlyDownloading && window.itzDownloaderAPI) {
-            window.itzDownloaderAPI.cancelJob(subJobId);
-          }
+    const isCurrentlyDownloading = playlistJob.items[itemIdx].status === 'downloading';
+    if (isCurrentlyDownloading && window.itzDownloaderAPI) {
+      window.itzDownloaderAPI.cancelJob(subJobId);
+    }
 
-          const updatedItems = [...j.items];
-          updatedItems[itemIdx] = {
-            ...updatedItems[itemIdx],
-            status: 'canceled',
-          };
+    const updatedItems = [...playlistJob.items];
+    updatedItems[itemIdx] = {
+      ...updatedItems[itemIdx],
+      status: 'canceled',
+    };
 
-          if (isCurrentlyDownloading) {
-            const nextQueuedIdx = updatedItems.findIndex((it) => it.status === 'queued');
-            if (nextQueuedIdx !== -1) {
-              updatedItems[nextQueuedIdx] = {
-                ...updatedItems[nextQueuedIdx],
-                status: 'downloading',
-              };
-              nextToStart = { playlistId: j.jobId, nextIdx: nextQueuedIdx };
-            }
-          }
+    let nextQueuedIdx = -1;
+    if (isCurrentlyDownloading) {
+      nextQueuedIdx = updatedItems.findIndex((it) => it.status === 'queued');
+      if (nextQueuedIdx !== -1) {
+        updatedItems[nextQueuedIdx] = {
+          ...updatedItems[nextQueuedIdx],
+          status: 'downloading',
+        };
+      }
+    }
 
-          const allDone = updatedItems.every((it) => it.status === 'completed' || it.status === 'error' || it.status === 'canceled');
+    const allDone = updatedItems.every(
+      (it) => it.status === 'completed' || it.status === 'error' || it.status === 'canceled'
+    );
 
-          const updatedJob = {
-            ...j,
-            status: allDone ? 'completed' : 'downloading',
-            items: updatedItems,
-          };
-          if (nextToStart) {
-            nextJobObj = updatedJob;
-          }
-          return updatedJob;
+    const updatedPlaylistJob = {
+      ...playlistJob,
+      status: allDone ? 'completed' : 'downloading',
+      items: updatedItems,
+    };
+
+    const nextJobs = currentJobs.map((j) => (j.jobId === playlistJobId ? updatedPlaylistJob : j));
+    jobsRef.current = nextJobs;
+    setJobs(nextJobs);
+
+    if (nextQueuedIdx !== -1) {
+      setTimeout(() => {
+        if (startNextPlaylistItemRef.current) {
+          startNextPlaylistItemRef.current(playlistJobId, nextQueuedIdx, updatedPlaylistJob);
         }
-        return j;
-      });
-      jobsRef.current = next;
-      return next;
-    });
-
-    if (nextToStart) {
-      startNextPlaylistItem(nextToStart.playlistId, nextToStart.nextIdx, nextJobObj);
+      }, 100);
     }
     showToast('Item download canceled.', 'info');
   };
@@ -818,7 +865,7 @@ export default function App() {
           </div>
 
           <div>
-            <span style={{ fontFamily: 'var(--font-mono)' }}>itzDownloader Desktop v1.2.5</span>
+            <span style={{ fontFamily: 'var(--font-mono)' }}>itzDownloader Desktop v1.2.6</span>
           </div>
         </footer>
       </div>

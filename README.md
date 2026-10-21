@@ -8,7 +8,7 @@
 The high-performance, private Windows workstation for instant video & audio downloads from YouTube, TikTok, Spotify, Instagram, and over 1,000+ online media platforms.
 
 [![Platform](https://img.shields.io/badge/Platform-Windows_10_%7C_11_(x64)-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/itzCrih/itzDownloader-Windows/releases/latest)
-[![Version](https://img.shields.io/badge/Version-v1.2.5-e6b422?style=for-the-badge)](https://github.com/itzCrih/itzDownloader-Windows/releases/latest)
+[![Version](https://img.shields.io/badge/Version-v1.2.6-e6b422?style=for-the-badge)](https://github.com/itzCrih/itzDownloader-Windows/releases/latest)
 [![Engine](https://img.shields.io/badge/yt--dlp-Native_v2025+-black?style=for-the-badge)](https://github.com/yt-dlp/yt-dlp)
 [![FFmpeg](https://img.shields.io/badge/FFmpeg-v7.1_Native-black?style=for-the-badge)](https://ffmpeg.org)
 [![Signed](https://img.shields.io/badge/Code_Signing-Authenticode_Signed-2ea043?style=for-the-badge&logo=shield&logoColor=white)](certs/)
@@ -16,19 +16,27 @@ The high-performance, private Windows workstation for instant video & audio down
 
 <br />
 
-### Download itzDownloader Desktop (v1.2.5)
+### Download itzDownloader Desktop (v1.2.6)
 
-[![Download Setup](https://img.shields.io/badge/Download_Installer-itzDownloader_Desktop_Setup_(v1.2.5)-e6b422?style=for-the-badge&logo=windows&logoColor=black)](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.2.5/itzDownloader-Desktop-Setup-1.2.5.exe)  
-[![Download Portable](https://img.shields.io/badge/Download_Portable-itzDownloader_Desktop_Portable_(v1.2.5)-ffffff?style=for-the-badge&logo=windows&logoColor=black)](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.2.5/itzDownloader-Desktop-1.2.5-Portable.exe)
+[![Download Setup](https://img.shields.io/badge/Download_Installer-itzDownloader_Desktop_Setup_(v1.2.6)-e6b422?style=for-the-badge&logo=windows&logoColor=black)](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.2.6/itzDownloader-Desktop-Setup-1.2.6.exe)  
+[![Download Portable](https://img.shields.io/badge/Download_Portable-itzDownloader_Desktop_Portable_(v1.2.6)-ffffff?style=for-the-badge&logo=windows&logoColor=black)](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.2.6/itzDownloader-Desktop-1.2.6-Portable.exe)
 
 | Package | Format | Architecture | Direct Link |
 | :--- | :--- | :--- | :--- |
-| **Windows Installer** | NSIS Setup `.exe` | Windows 10 / 11 (x64) | [itzDownloader-Desktop-Setup-1.2.5.exe](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.2.5/itzDownloader-Desktop-Setup-1.2.5.exe) |
-| **Standalone Portable** | Portable `.exe` | Windows 10 / 11 (x64) | [itzDownloader-Desktop-1.2.5-Portable.exe](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.2.5/itzDownloader-Desktop-1.2.5-Portable.exe) |
+| **Windows Installer** | NSIS Setup `.exe` | Windows 10 / 11 (x64) | [itzDownloader-Desktop-Setup-1.2.6.exe](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.2.6/itzDownloader-Desktop-Setup-1.2.6.exe) |
+| **Standalone Portable** | Portable `.exe` | Windows 10 / 11 (x64) | [itzDownloader-Desktop-1.2.6-Portable.exe](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.2.6/itzDownloader-Desktop-1.2.6-Portable.exe) |
 
 *Authenticode code signed with DigiCert RFC 3161 timestamps. Built-in Auto-Updater checks for future releases seamlessly on startup.*
 
 </div>
+
+---
+
+## What's New in v1.2.6
+
+- 🔄 **Sequential Playlist Download Chain Fix:** Completely re-engineered the playlist sequential chain in the event loop. In v1.2.5, React 18 concurrent update batching caused the queue to freeze at item 2 after item 1 finished because the next item invocation was executed outside the asynchronous updater before state resolved. Playlist state updates and next-item dispatching are now fully synchronous and decoupled from React's internal updater queue, with a dedicated process-cleanup interval ensuring all previous process file locks are freed.
+- ⚡ **Zero-Stall Fallback Mechanism:** Added automatic process fallback safeguards in `startNextPlaylistItem`. If any individual playlist item encounters an unhandled OS spawn error or immediate rejection, the queue automatically advances to the next item instead of stalling.
+- 🛡️ **Authenticode Digitally Signed Release:** Both the NSIS Setup installer and standalone Portable executables are fully signed with RFC 3161 timestamping.
 
 ---
 
