@@ -21,7 +21,7 @@ import {
   ChevronUp
 } from 'lucide-react';
 import { detectPlatform, validateMediaUrl } from '../utils/platformDetect';
-import { formatDuration } from '../utils/formatters';
+import { formatDuration, getItemUnit, isVideoJobOrPreset } from '../utils/formatters';
 
 export default function InstantTab({
   onAddJob,
@@ -177,8 +177,9 @@ export default function InstantTab({
         createdAt: Date.now(),
       };
 
+      const unit = getItemUnit(presetToUse, null, { platform, mediaInfo });
       onAddJob(jobConfig);
-      onShowToast(`Started playlist download: ${mediaInfo?.title || 'Playlist'} (${mediaInfo?.itemCount || 0} tracks)`, 'success');
+      onShowToast(`Started playlist download: ${mediaInfo?.title || 'Playlist'} (${mediaInfo?.itemCount || 0} ${unit})`, 'success');
       setIsDownloading(true);
       return;
     }
@@ -401,7 +402,7 @@ export default function InstantTab({
                 {mediaInfo.isPlaylist && (
                   <span className="media-type-badge playlist">
                     <ListMusic size={11} style={{ marginRight: 3, verticalAlign: 'middle' }} />
-                    {mediaInfo.isAlbum ? `ALBUM • ${mediaInfo.itemCount} TRACKS` : `PLAYLIST • ${mediaInfo.itemCount} SONGS`}
+                    {mediaInfo.isAlbum ? `ALBUM • ${mediaInfo.itemCount} TRACKS` : `PLAYLIST • ${mediaInfo.itemCount} ${isVideoJobOrPreset(selectedPreset, null, platform, mediaInfo) ? 'VIDEOS' : 'SONGS'}`}
                   </span>
                 )}
                 {!mediaInfo.isPlaylist && isAudioOnlyMedia && <span className="media-type-badge audio">AUDIO TRACK</span>}
@@ -460,7 +461,7 @@ export default function InstantTab({
           >
             <div className="playlist-toggle-title">
               <ListMusic size={15} color="#e6b422" />
-              <span>Songs in this Playlist ({mediaInfo.entries.length})</span>
+              <span>{getItemUnit(selectedPreset, null, { capitalize: true, platform, mediaInfo })} in this Playlist ({mediaInfo.entries.length})</span>
             </div>
             {showTracklistPreview ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
           </button>
@@ -773,7 +774,7 @@ export default function InstantTab({
                   <Sparkles size={17} />
                   <span>
                     {mediaInfo?.isPlaylist && playlistMode === 'playlist'
-                      ? `Download Playlist (${mediaInfo.itemCount || 0} Songs)`
+                      ? `Download Playlist (${mediaInfo.itemCount || 0} ${getItemUnit(selectedPreset, null, { capitalize: true, platform, mediaInfo })})`
                       : 'Download Now'}
                   </span>
                 </button>

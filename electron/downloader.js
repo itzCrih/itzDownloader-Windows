@@ -328,14 +328,24 @@ class Downloader {
                 ? entry.thumbnails[entry.thumbnails.length - 1].url
                 : null;
               const entryId = entry.id || `entry_${idx}`;
-              const videoUrl = entry.url && entry.url.startsWith('http')
-                ? entry.url
-                : `https://www.youtube.com/watch?v=${entryId}`;
+              let videoUrl;
+              if (entryId && !entryId.startsWith('entry_')) {
+                // Ensure clean YouTube video URL without recursive playlist parameter
+                videoUrl = `https://www.youtube.com/watch?v=${entryId}`;
+              } else if (entry.url && entry.url.startsWith('http')) {
+                videoUrl = entry.url;
+              } else if (entry.url && entry.url.startsWith('/')) {
+                videoUrl = `https://www.youtube.com${entry.url}`;
+              } else if (entry.url) {
+                videoUrl = `https://www.youtube.com/watch?v=${entry.url}`;
+              } else {
+                videoUrl = cleanUrl;
+              }
 
               return {
                 index: idx + 1,
                 id: entryId,
-                title: entry.title || `Track ${idx + 1}`,
+                title: entry.title || `Item ${idx + 1}`,
                 author: entry.uploader || entry.channel || info.uploader || 'YouTube',
                 duration: entry.duration || 0,
                 thumbnail: thumb,
@@ -700,8 +710,12 @@ class Downloader {
       throw new Error('This domain is blocked by security policy.');
     }
 
-    if (!fs.existsSync(outputDir)) {
-      fs.mkdirSync(outputDir, { recursive: true });
+    const resolvedOutputDir = (outputDir && typeof outputDir === 'string' && outputDir.trim())
+      ? outputDir
+      : path.join(os.homedir(), 'Downloads', 'itzDownloader');
+
+    if (!fs.existsSync(resolvedOutputDir)) {
+      fs.mkdirSync(resolvedOutputDir, { recursive: true });
     }
 
     // Safely destructure custom options with defaults to prevent ReferenceError
@@ -736,7 +750,7 @@ class Downloader {
           if (onLog) onLog('[TikTok Engine] Extracting clean audio track via TikWM stream...');
           return await this._downloadDirectTikTokAudio(
             tikTokInfo.tiktokDirectAudio || tikTokInfo.tiktokDirectVideo,
-            outputDir,
+            resolvedOutputDir,
             jobConfig,
             tikTokInfo.title,
             preset,
@@ -748,7 +762,7 @@ class Downloader {
           if (onLog) onLog('[TikTok Engine] Downloading clean MP4 video (No Watermark) via TikWM...');
           return await this._downloadDirectTikTokVideo(
             tikTokInfo.tiktokDirectVideo,
-            outputDir,
+            resolvedOutputDir,
             jobConfig,
             tikTokInfo.title,
             fastReencode,
@@ -807,8 +821,8 @@ class Downloader {
 
     // Output naming template
     const templateName = isSpotify
-      ? path.join(outputDir, '%(title)s.%(ext)s')
-      : path.join(outputDir, '%(title)s [%(id)s].%(ext)s');
+      ? path.join(resolvedOutputDir, '%(title)s.%(ext)s')
+      : path.join(resolvedOutputDir, '%(title)s [%(id)s].%(ext)s');
     args.push('-o', templateName);
 
     // Apply Presets
@@ -927,7 +941,7 @@ class Downloader {
       const proc = spawn(this.engineManager.ytDlpPath, args, { windowsHide: true });
       let finalFilePath = null;
 
-      this.activeJobs.set(jobId, { proc, config: jobConfig, outputDir });
+      this.activeJobs.set(jobId, { proc, config: jobConfig, outputDir: resolvedOutputDir });
       let convertingInterval = null;
 
       proc.stdout.on('data', (data) => {
@@ -1023,7 +1037,7 @@ class Downloader {
         if (code === 0) {
           if (!finalFilePath || !fs.existsSync(finalFilePath)) {
             try {
-              const files = fs.readdirSync(outputDir).map((f) => path.join(outputDir, f));
+              const files = fs.readdirSync(resolvedOutputDir).map((f) => path.join(resolvedOutputDir, f));
               files.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
               const validFile = files.find((f) => !f.endsWith('.part') && !f.endsWith('.ytdl'));
               if (validFile) finalFilePath = validFile;
