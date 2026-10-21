@@ -20,7 +20,7 @@ import {
   Clock,
   ExternalLink
 } from 'lucide-react';
-import { formatBytes, formatDuration } from '../utils/formatters';
+import { formatBytes, formatDuration, getItemUnit } from '../utils/formatters';
 
 export default function QueueTab({
   jobs = [],
@@ -196,7 +196,7 @@ export default function QueueTab({
                       <span className="queue-meta-pill">{job.author || 'Playlist'}</span>
                       <span className="queue-meta-pill playlist-badge">
                         <ListMusic size={11} style={{ marginRight: 4 }} />
-                        <span>Playlist • {job.totalItems || 0} songs</span>
+                        <span>Playlist • {job.totalItems || 0} {getItemUnit(job.preset, job.customOptions)}</span>
                       </span>
                       <span className="queue-meta-pill preset">
                         {job.preset === 'custom' && job.customOptions?.mediaType === 'audio'
@@ -224,11 +224,11 @@ export default function QueueTab({
                               <span className="pulse-indicator-dot" />
                               <span>
                                 Item {(job.activeItemIndex || 0) + 1} of {job.totalItems}:{' '}
-                                <strong>{job.progress?.currentSongTitle || job.items?.[job.activeItemIndex]?.title || 'Processing...'}</strong>
+                                <strong>{job.progress?.currentItemTitle || job.progress?.currentSongTitle || job.items?.[job.activeItemIndex]?.title || 'Processing...'}</strong>
                               </span>
                             </>
                           )}
-                          {isCompleted && 'All songs downloaded and processed successfully!'}
+                          {isCompleted && `All ${getItemUnit(job.preset, job.customOptions)} downloaded and processed successfully!`}
                           {isCanceled && 'Playlist download canceled.'}
                         </span>
                         {job.progress?.speed && isDownloading && (
@@ -277,7 +277,7 @@ export default function QueueTab({
                     >
                       <div className="playlist-tracklist-toggle-left">
                         <ListMusic size={14} color="#e6b422" />
-                        <span>Songs in Queue ({job.items.length})</span>
+                        <span>{getItemUnit(job.preset, job.customOptions, { capitalize: true })} in Queue ({job.items.length})</span>
                       </div>
                       <div className="playlist-tracklist-toggle-right">
                         <span>{job.completedCount || 0} of {job.totalItems || job.items.length} done</span>
@@ -380,7 +380,7 @@ export default function QueueTab({
                                     type="button"
                                     className="btn-track-action cancel"
                                     onClick={() => onCancelPlaylistItem(job.jobId, item.subJobId)}
-                                    title="Skip/Cancel this track"
+                                    title={`Skip/Cancel this ${getItemUnit(job.preset, job.customOptions, { plural: false })}`}
                                   >
                                     <XCircle size={12} />
                                   </button>

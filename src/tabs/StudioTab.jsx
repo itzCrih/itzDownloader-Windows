@@ -20,7 +20,7 @@ import {
   VolumeX
 } from 'lucide-react';
 import { detectPlatform, validateMediaUrl } from '../utils/platformDetect';
-import { formatDuration } from '../utils/formatters';
+import { formatDuration, getItemUnit } from '../utils/formatters';
 
 export default function StudioTab({
   initialUrl = '',
@@ -166,8 +166,9 @@ export default function StudioTab({
       createdAt: Date.now(),
     };
 
+    const unit = getItemUnit(null, { mediaType }, { platform, mediaInfo });
     onAddJob(jobConfig);
-    onShowToast(`Custom job queued: ${mediaInfo?.title || 'Media'}${isPlaylist ? ` (${mediaInfo.itemCount} tracks)` : ''}`, 'success');
+    onShowToast(`Custom job queued: ${mediaInfo?.title || 'Media'}${isPlaylist ? ` (${mediaInfo.itemCount} ${unit})` : ''}`, 'success');
   };
 
   return (
@@ -247,7 +248,7 @@ export default function StudioTab({
             <div className="studio-snippet-info">
               <span className="snippet-title">{mediaInfo.title}</span>
               <span className="snippet-meta">
-                {mediaInfo.author} • {mediaInfo.isPlaylist ? `${mediaInfo.itemCount || 0} Tracks • ` : ''}{formatDuration(mediaInfo.duration)}
+                {mediaInfo.author} • {mediaInfo.isPlaylist ? `${mediaInfo.itemCount || 0} ${mediaType === 'video' ? 'Videos' : 'Tracks'} • ` : ''}{formatDuration(mediaInfo.duration)}
                 {mediaInfo.resolutions?.length > 0 && ` • Up to ${mediaInfo.resolutions[0].label}`}
               </span>
             </div>
@@ -664,7 +665,7 @@ export default function StudioTab({
             <Sparkles size={17} />
             <span>
               {mediaInfo?.isPlaylist
-                ? `Start Advanced Download (${mediaInfo.itemCount || 0} Tracks)`
+                ? `Start Advanced Download (${mediaInfo.itemCount || 0} ${mediaType === 'video' ? 'Videos' : 'Tracks'})`
                 : 'Start Advanced Download'}
             </span>
           </button>
