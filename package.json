@@ -1,6 +1,6 @@
 {
   "name": "itzdownloader-desktop",
-  "version": "1.2.6",
+  "version": "1.2.7",
   "description": "itzDownloader Desktop — Ultra-Fast, 100% Local Video & Audio Suite for Windows",
   "productName": "itzDownloader Desktop",
   "main": "electron/main.js",

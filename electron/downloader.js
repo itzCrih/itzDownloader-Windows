@@ -205,10 +205,80 @@ function formatYtDlpError(errText = '') {
   return errText.split(/\r?\n/)[0] || 'Inspection failed. Please check the URL and network connection.';
 }
 
+class YouTubeAntiBlockManager {
+  constructor() {
+    this.requestTimestamps = [];
+    this.clientProfiles = ['android,web', 'ios,web', 'mweb,web', 'web_creator,web'];
+    this.currentProfileIndex = 0;
+    this.userAgents = [
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
+      'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+    ];
+    this.currentUserAgentIndex = 0;
+  }
+
+  recordRequest() {
+    const now = Date.now();
+    this.requestTimestamps.push(now);
+    // Keep last 60 seconds
+    this.requestTimestamps = this.requestTimestamps.filter((t) => now - t < 60000);
+  }
+
+  isFrequentUsage() {
+    // If 3 or more requests in the last 30 seconds
+    const now = Date.now();
+    const recentCount = this.requestTimestamps.filter((t) => now - t < 30000).length;
+    return recentCount >= 3;
+  }
+
+  rotateProfile() {
+    this.currentProfileIndex = (this.currentProfileIndex + 1) % this.clientProfiles.length;
+    return this.clientProfiles[this.currentProfileIndex];
+  }
+
+  rotateUserAgent() {
+    this.currentUserAgentIndex = (this.currentUserAgentIndex + 1) % this.userAgents.length;
+    return this.userAgents[this.currentUserAgentIndex];
+  }
+
+  getAntiBlockArgs(isFrequent) {
+    const client = isFrequent ? this.rotateProfile() : this.clientProfiles[this.currentProfileIndex];
+    const userAgent = isFrequent ? this.rotateUserAgent() : this.userAgents[this.currentUserAgentIndex];
+    const antiBlockArgs = [
+      '--extractor-args', `youtube:player_client=${client}`,
+      '--user-agent', userAgent,
+      '--socket-timeout', '30',
+      '--retries', '10',
+      '--fragment-retries', '10',
+      '--retry-sleep', '429:5',
+    ];
+
+    if (isFrequent) {
+      // Gentle jitter pacing between rapid requests to avoid CDN IP bot-rate bans
+      antiBlockArgs.push('--sleep-requests', '0.75');
+    }
+
+    return {
+      args: antiBlockArgs,
+      client,
+      userAgent,
+      isFrequent,
+    };
+  }
+}
+
 class Downloader {
   constructor(engineManager) {
     this.engineManager = engineManager;
     this.activeJobs = new Map(); // jobId -> { proc, config, abortFn, outputDir }
+    this.youtubeAntiBlock = new YouTubeAntiBlockManager();
+  }
+
+  _isYoutubeUrl(url = '') {
+    const u = (url || '').toLowerCase();
+    return u.includes('youtube.com') || u.includes('youtu.be');
   }
 
   _isTikTokUrl(url = '') {
@@ -284,6 +354,19 @@ class Downloader {
 
     if (options.cookiesBrowser && options.cookiesBrowser !== 'none') {
       args.push('--cookies-from-browser', options.cookiesBrowser);
+    }
+
+    // YouTube-Specific Anti-Block Protection for metadata queries
+    if (isYoutube) {
+      this.youtubeAntiBlock.recordRequest();
+      const isFrequent = this.youtubeAntiBlock.isFrequentUsage();
+      const antiBlock = this.youtubeAntiBlock.getAntiBlockArgs(isFrequent);
+      args.push(...antiBlock.args);
+    }
+
+    // Network Proxy Support
+    if (options.proxy && typeof options.proxy === 'string' && options.proxy.trim()) {
+      args.push('--proxy', options.proxy.trim());
     }
 
     args.push(cleanUrl);
@@ -813,6 +896,35 @@ class Downloader {
       args.push('--no-playlist');
     }
 
+    // Speed & Stream Stability Optimization: download 4 fragments concurrently and buffer chunks to stabilize speed
+    args.push(
+      '--concurrent-fragments', '4',
+      '--buffer-size', '64K',
+      '--http-chunk-size', '10M'
+    );
+
+    // YouTube-Specific Anti-Block Shield (strictly applied ONLY to YouTube sessions)
+    const isYoutube = this._isYoutubeUrl(downloadUrl) || this._isYoutubeUrl(url);
+    if (isYoutube) {
+      this.youtubeAntiBlock.recordRequest();
+      const isFrequent = this.youtubeAntiBlock.isFrequentUsage();
+      const antiBlock = this.youtubeAntiBlock.getAntiBlockArgs(isFrequent);
+      args.push(...antiBlock.args);
+      if (onLog && isFrequent) {
+        onLog(`[YouTube Anti-Block] Rapid requests detected: profile (${antiBlock.client}) with randomized session pacing applied`);
+      }
+    }
+
+    // Network Proxy Support
+    const effectiveProxy = (jobConfig.proxy || customOptions.proxy || '').trim();
+    if (effectiveProxy) {
+      args.push('--proxy', effectiveProxy);
+      if (onLog) {
+        const maskedProxy = effectiveProxy.replace(/:([^@/]+)@/, ':****@');
+        onLog(`[Network Proxy] Routing connection through ${maskedProxy}`);
+      }
+    }
+
     // Point to ffmpeg if available
     if (this.engineManager.ffmpegPath) {
       const ffmpegDir = path.dirname(this.engineManager.ffmpegPath);
@@ -935,7 +1047,13 @@ class Downloader {
 
     args.push(downloadUrl);
 
-    if (onLog) onLog(`[yt-dlp] Starting execution with args: ${args.slice(0, 8).join(' ')} ...`);
+    const sanitizedLogArgs = args.slice(0, 10).map((arg, idx, arr) => {
+      if (arr[idx - 1] === '--proxy') {
+        return arg.replace(/:([^@/]+)@/, ':****@');
+      }
+      return arg;
+    });
+    if (onLog) onLog(`[yt-dlp] Starting execution with args: ${sanitizedLogArgs.join(' ')} ...`);
 
     return new Promise((resolve, reject) => {
       const proc = spawn(this.engineManager.ytDlpPath, args, { windowsHide: true });

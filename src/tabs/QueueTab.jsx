@@ -143,6 +143,10 @@ export default function QueueTab({
           const isPlaylistExpanded = expandedPlaylists[job.jobId] !== false; // default open so user sees songs!
 
           if (isPlaylist) {
+            const activeCount = Array.isArray(job.items)
+              ? job.items.filter((it) => it.status === 'downloading' || it.status === 'converting').length
+              : 0;
+
             return (
               <div key={job.jobId} className={`queue-card playlist-card status-${job.status}`}>
                 <div className="queue-card-main">
@@ -185,7 +189,7 @@ export default function QueueTab({
                         {job.title}
                       </span>
                       <span className={`queue-status-badge ${job.status}`}>
-                        {isDownloading && `Downloading (${job.completedCount || 0}/${job.totalItems || 0})`}
+                        {isDownloading && `Downloading (${job.completedCount || 0}/${job.totalItems || 0}${activeCount > 1 ? ` • ${activeCount} active` : ''})`}
                         {isCompleted && `Completed (${job.completedCount || job.totalItems}/${job.totalItems})`}
                         {isCanceled && 'Canceled'}
                         {isError && 'Failed'}
@@ -223,8 +227,16 @@ export default function QueueTab({
                             <>
                               <span className="pulse-indicator-dot" />
                               <span>
-                                Item {(job.activeItemIndex || 0) + 1} of {job.totalItems}:{' '}
-                                <strong>{job.progress?.currentItemTitle || job.progress?.currentSongTitle || job.items?.[job.activeItemIndex]?.title || 'Processing...'}</strong>
+                                {activeCount > 1 ? (
+                                  <>
+                                    <strong>{activeCount} active streams</strong> • {job.completedCount || 0} of {job.totalItems} done
+                                  </>
+                                ) : (
+                                  <>
+                                    Item {(job.activeItemIndex || 0) + 1} of {job.totalItems}:{' '}
+                                    <strong>{job.progress?.currentItemTitle || job.progress?.currentSongTitle || job.items?.[job.activeItemIndex]?.title || 'Processing...'}</strong>
+                                  </>
+                                )}
                               </span>
                             </>
                           )}

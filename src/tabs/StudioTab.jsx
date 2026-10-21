@@ -30,6 +30,7 @@ export default function StudioTab({
   defaultOutputDir,
   onNavigateToQueue,
   engineStatus,
+  proxySettings,
 }) {
   const [url, setUrl] = useState(initialUrl || '');
   const [isInspecting, setIsInspecting] = useState(false);
@@ -94,7 +95,10 @@ export default function StudioTab({
 
     setIsInspecting(true);
     try {
-      const info = await window.itzDownloaderAPI.inspectUrl(clean, { cookiesBrowser });
+      const info = await window.itzDownloaderAPI.inspectUrl(clean, {
+        cookiesBrowser,
+        proxy: proxySettings?.enabled && proxySettings?.url ? proxySettings.url.trim() : null,
+      });
       setMediaInfo(info);
       setInspectError(null);
       if (info.isAudioOnly) {
