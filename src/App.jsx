@@ -48,16 +48,16 @@ export default function App() {
 
   const [defaultCookiesBrowser, setDefaultCookiesBrowser] = useState(() => {
     try {
-      return localStorage.getItem('itzdownloader_cookies') || 'none';
+      return localStorage.getItem('itzdownloader_cookies') || 'auto';
     } catch {
-      return 'none';
+      return 'auto';
     }
   });
 
   const [updateState, setUpdateState] = useState({
     status: 'idle',
-    currentVersion: '1.2.7',
-    latestVersion: '1.2.7',
+    currentVersion: '1.2.8',
+    latestVersion: '1.2.8',
     downloadPercent: 0,
     error: null,
   });
@@ -246,13 +246,13 @@ export default function App() {
     jobsRef.current = nextJobs;
     setJobs(nextJobs);
 
-    // Stagger start execution with 150ms gap so processes launch smoothly
+    // Stagger start execution with 750ms gap so processes launch smoothly and avoid burst rate-limiting
     queuedIndices.forEach((idx, offset) => {
       setTimeout(() => {
         if (startNextPlaylistItemRef.current) {
           startNextPlaylistItemRef.current(playlistJobId, idx, updatedPlaylistJob);
         }
-      }, offset * 150);
+      }, offset * 750);
     });
   };
   pumpPlaylistQueueRef.current = pumpPlaylistQueue;
@@ -977,7 +977,7 @@ export default function App() {
           </div>
 
           <div>
-            <span style={{ fontFamily: 'var(--font-mono)' }}>itzDownloader Desktop v1.2.7</span>
+            <span style={{ fontFamily: 'var(--font-mono)' }}>itzDownloader Desktop v1.2.8</span>
           </div>
         </footer>
       </div>

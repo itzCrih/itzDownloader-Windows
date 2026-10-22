@@ -449,11 +449,12 @@ export default function SettingsTab({
               value={defaultCookiesBrowser}
               onChange={(e) => onChangeCookiesBrowser(e.target.value)}
             >
-              <option value="none">None</option>
-              <option value="chrome">Google Chrome</option>
-              <option value="firefox">Mozilla Firefox</option>
-              <option value="edge">Microsoft Edge</option>
+              <option value="auto">Auto-Detect (Brave / Firefox / Chrome) - Recommended</option>
               <option value="brave">Brave</option>
+              <option value="firefox">Mozilla Firefox</option>
+              <option value="chrome">Google Chrome</option>
+              <option value="edge">Microsoft Edge</option>
+              <option value="none">Disabled (Unauthenticated)</option>
             </select>
           </div>
         </div>

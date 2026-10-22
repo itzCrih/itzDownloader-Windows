@@ -1,4 +1,4 @@
-const { spawn, execSync } = require('child_process');
+const { spawn, execSync, spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
@@ -163,8 +163,14 @@ function validateMediaUrl(targetUrl = '') {
 
 function formatYtDlpError(errText = '') {
   const e = (errText || '').toLowerCase();
-  if (e.includes('sign in to confirm your age') || e.includes('confirm you’re not a bot') || e.includes('sign in to confirm you’re not a bot')) {
-    return 'Age-restricted or verification check detected. Select your browser in Cookies (under Advanced or Settings) to download seamlessly.';
+  if (e.includes('sign in to confirm') || e.includes('not a bot') || e.includes('confirm you')) {
+    return 'YouTube Bot Verification Check encountered. Please select your browser (Brave, Firefox, Chrome) under Settings > Browser Cookies, or use a network proxy.';
+  }
+  if (e.includes('unable to recognize tab page') || e.includes('the playlist does not exist') || e.includes('playlist does not exist')) {
+    return 'The requested YouTube playlist was not found or is private. Please verify the URL.';
+  }
+  if (e.includes('sign in to confirm your age')) {
+    return 'Age-restricted content detected. Select your browser in Cookies (under Advanced or Settings) to download seamlessly.';
   }
   if (e.includes('requiring login for access to this content') || e.includes('tiktok is requiring login')) {
     return 'TikTok requires authentication or was temporarily blocked. The built-in direct TikWM engine will download this without watermark.';
@@ -206,17 +212,12 @@ function formatYtDlpError(errText = '') {
 }
 
 class YouTubeAntiBlockManager {
-  constructor() {
+  constructor(engineManager) {
+    this.engineManager = engineManager;
     this.requestTimestamps = [];
-    this.clientProfiles = ['android,web', 'ios,web', 'mweb,web', 'web_creator,web'];
-    this.currentProfileIndex = 0;
-    this.userAgents = [
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
-      'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
-    ];
-    this.currentUserAgentIndex = 0;
+    this.cachedWorkingBrowser = null;
+    this.lastVerifiedTimestamp = 0;
+    this.candidateBrowsers = ['brave', 'firefox', 'chrome', 'edge', 'opera', 'vivaldi'];
   }
 
   recordRequest() {
@@ -233,26 +234,51 @@ class YouTubeAntiBlockManager {
     return recentCount >= 3;
   }
 
-  rotateProfile() {
-    this.currentProfileIndex = (this.currentProfileIndex + 1) % this.clientProfiles.length;
-    return this.clientProfiles[this.currentProfileIndex];
+  getWorkingBrowser() {
+    return this.cachedWorkingBrowser;
   }
 
-  rotateUserAgent() {
-    this.currentUserAgentIndex = (this.currentUserAgentIndex + 1) % this.userAgents.length;
-    return this.userAgents[this.currentUserAgentIndex];
+  setWorkingBrowser(browser) {
+    if (browser && browser !== 'none' && browser !== 'auto') {
+      this.cachedWorkingBrowser = browser;
+      this.lastVerifiedTimestamp = Date.now();
+    }
   }
 
-  getAntiBlockArgs(isFrequent) {
-    const client = isFrequent ? this.rotateProfile() : this.clientProfiles[this.currentProfileIndex];
-    const userAgent = isFrequent ? this.rotateUserAgent() : this.userAgents[this.currentUserAgentIndex];
+  findWorkingBrowser() {
+    if (this.cachedWorkingBrowser && (Date.now() - this.lastVerifiedTimestamp < 600000)) {
+      return this.cachedWorkingBrowser;
+    }
+
+    const ytDlp = this.engineManager?.ytDlpPath;
+    if (!ytDlp) return null;
+
+    for (const b of this.candidateBrowsers) {
+      try {
+        const testRes = spawnSync(ytDlp, [
+          '--cookies-from-browser', b,
+          '--skip-download',
+          '--no-warnings',
+          'https://www.youtube.com/robots.txt'
+        ], { windowsHide: true, encoding: 'utf8', timeout: 3500 });
+
+        if (testRes.stdout && (testRes.stdout.includes('robots.txt') || testRes.stdout.includes('User-agent'))) {
+          this.cachedWorkingBrowser = b;
+          this.lastVerifiedTimestamp = Date.now();
+          return b;
+        }
+      } catch (e) {}
+    }
+    return null;
+  }
+
+  getAntiBlockArgs(isFrequent, chosenBrowser = null) {
     const antiBlockArgs = [
-      '--extractor-args', `youtube:player_client=${client}`,
-      '--user-agent', userAgent,
       '--socket-timeout', '30',
       '--retries', '10',
       '--fragment-retries', '10',
       '--retry-sleep', '429:5',
+      '--js-runtimes', 'node',
     ];
 
     if (isFrequent) {
@@ -260,11 +286,19 @@ class YouTubeAntiBlockManager {
       antiBlockArgs.push('--sleep-requests', '0.75');
     }
 
+    let effectiveBrowser = chosenBrowser;
+    if (!effectiveBrowser || effectiveBrowser === 'auto') {
+      effectiveBrowser = this.getWorkingBrowser() || this.findWorkingBrowser();
+    }
+
+    if (effectiveBrowser && effectiveBrowser !== 'none' && effectiveBrowser !== 'auto') {
+      antiBlockArgs.push('--cookies-from-browser', effectiveBrowser);
+    }
+
     return {
       args: antiBlockArgs,
-      client,
-      userAgent,
       isFrequent,
+      effectiveBrowser,
     };
   }
 }
@@ -273,7 +307,7 @@ class Downloader {
   constructor(engineManager) {
     this.engineManager = engineManager;
     this.activeJobs = new Map(); // jobId -> { proc, config, abortFn, outputDir }
-    this.youtubeAntiBlock = new YouTubeAntiBlockManager();
+    this.youtubeAntiBlock = new YouTubeAntiBlockManager(engineManager);
   }
 
   _isYoutubeUrl(url = '') {
@@ -318,6 +352,10 @@ class Downloader {
     }
 
     // 3. Use yt-dlp to inspect media for YouTube, Twitter, Twitch, etc.
+    return await this._executeInspectUrl(cleanUrl, options, false);
+  }
+
+  async _executeInspectUrl(cleanUrl, options = {}, isRetry = false) {
     if (!this.engineManager.ytDlpPath) {
       await this.engineManager.detect();
     }
@@ -352,16 +390,17 @@ class Downloader {
       args.push('--skip-download');
     }
 
-    if (options.cookiesBrowser && options.cookiesBrowser !== 'none') {
-      args.push('--cookies-from-browser', options.cookiesBrowser);
-    }
+    const activeBrowser = options.cookiesBrowser;
 
-    // YouTube-Specific Anti-Block Protection for metadata queries
     if (isYoutube) {
       this.youtubeAntiBlock.recordRequest();
       const isFrequent = this.youtubeAntiBlock.isFrequentUsage();
-      const antiBlock = this.youtubeAntiBlock.getAntiBlockArgs(isFrequent);
+      const antiBlock = this.youtubeAntiBlock.getAntiBlockArgs(isFrequent, activeBrowser);
       args.push(...antiBlock.args);
+    } else {
+      if (activeBrowser && activeBrowser !== 'none' && activeBrowser !== 'auto') {
+        args.push('--cookies-from-browser', activeBrowser);
+      }
     }
 
     // Network Proxy Support
@@ -379,9 +418,23 @@ class Downloader {
       proc.stdout.on('data', (d) => { stdout += d.toString(); });
       proc.stderr.on('data', (d) => { stderr += d.toString(); });
 
-      proc.on('close', (code) => {
+      proc.on('close', async (code) => {
         if (code !== 0) {
           const errDetail = stderr.trim() || 'Could not fetch metadata for this URL.';
+          const lowerErr = errDetail.toLowerCase();
+          const isBotCheck = isYoutube && (lowerErr.includes('sign in to confirm') || lowerErr.includes('not a bot') || lowerErr.includes('bot'));
+
+          if (isBotCheck && !isRetry) {
+            const fallbackBrowsers = ['brave', 'firefox', 'chrome', 'edge'].filter((b) => b !== activeBrowser);
+            for (const fb of fallbackBrowsers) {
+              try {
+                const rescueResult = await this._executeInspectUrl(cleanUrl, { ...options, cookiesBrowser: fb }, true);
+                this.youtubeAntiBlock.setWorkingBrowser(fb);
+                return resolve(rescueResult);
+              } catch (rescueErr) {}
+            }
+          }
+
           return reject(new Error(formatYtDlpError(errDetail)));
         }
 
@@ -905,13 +958,19 @@ class Downloader {
 
     // YouTube-Specific Anti-Block Shield (strictly applied ONLY to YouTube sessions)
     const isYoutube = this._isYoutubeUrl(downloadUrl) || this._isYoutubeUrl(url);
+    const chosenBrowser = customOptions.cookiesBrowser || jobConfig.cookiesBrowser;
+
     if (isYoutube) {
       this.youtubeAntiBlock.recordRequest();
       const isFrequent = this.youtubeAntiBlock.isFrequentUsage();
-      const antiBlock = this.youtubeAntiBlock.getAntiBlockArgs(isFrequent);
+      const antiBlock = this.youtubeAntiBlock.getAntiBlockArgs(isFrequent, chosenBrowser);
       args.push(...antiBlock.args);
-      if (onLog && isFrequent) {
-        onLog(`[YouTube Anti-Block] Rapid requests detected: profile (${antiBlock.client}) with randomized session pacing applied`);
+      if (onLog && antiBlock.effectiveBrowser) {
+        onLog(`[YouTube Shield] Active authenticated session via ${antiBlock.effectiveBrowser} cookies`);
+      }
+    } else {
+      if (chosenBrowser && chosenBrowser !== 'none' && chosenBrowser !== 'auto') {
+        args.push('--cookies-from-browser', chosenBrowser);
       }
     }
 
@@ -1022,8 +1081,10 @@ class Downloader {
         args.push('--limit-rate', rateLimit);
       }
 
-      if (cookiesBrowser && cookiesBrowser !== 'none') {
-        args.push('--cookies-from-browser', cookiesBrowser);
+      if (cookiesBrowser && cookiesBrowser !== 'none' && cookiesBrowser !== 'auto') {
+        if (!args.includes('--cookies-from-browser')) {
+          args.push('--cookies-from-browser', cookiesBrowser);
+        }
       }
 
       if (extraArgs && typeof extraArgs === 'string') {
@@ -1039,7 +1100,7 @@ class Downloader {
     if (jobConfig.globalRateLimit && jobConfig.globalRateLimit !== 'unlimited') {
       args.push('--limit-rate', jobConfig.globalRateLimit);
     }
-    if (jobConfig.cookiesBrowser && jobConfig.cookiesBrowser !== 'none') {
+    if (jobConfig.cookiesBrowser && jobConfig.cookiesBrowser !== 'none' && jobConfig.cookiesBrowser !== 'auto') {
       if (!args.includes('--cookies-from-browser')) {
         args.push('--cookies-from-browser', jobConfig.cookiesBrowser);
       }
@@ -1173,6 +1234,27 @@ class Downloader {
             outputSize,
           });
         } else {
+          const lowerErr = accumulatedStderr.toLowerCase();
+          const isBotChallenge = isYoutube && (lowerErr.includes('sign in to confirm') || lowerErr.includes('not a bot') || lowerErr.includes('bot'));
+          if (isBotChallenge && !jobConfig._botRetried) {
+            const workingBrowser = this.youtubeAntiBlock.findWorkingBrowser();
+            if (workingBrowser) {
+              if (onLog) {
+                onLog(`[YouTube Shield] Bot challenge detected. Automatically rescuing download using ${workingBrowser} session...`);
+              }
+              this.youtubeAntiBlock.setWorkingBrowser(workingBrowser);
+              const retryConfig = {
+                ...jobConfig,
+                _botRetried: true,
+                cookiesBrowser: workingBrowser,
+                customOptions: {
+                  ...(jobConfig.customOptions || {}),
+                  cookiesBrowser: workingBrowser,
+                },
+              };
+              return this.startDownload(retryConfig, onProgress, onLog).then(resolve).catch(reject);
+            }
+          }
           const userFriendly = formatYtDlpError(accumulatedStderr);
           reject(new Error(userFriendly));
         }
