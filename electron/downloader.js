@@ -163,6 +163,9 @@ function validateMediaUrl(targetUrl = '') {
 
 function formatYtDlpError(errText = '') {
   const e = (errText || '').toLowerCase();
+  if ((e.includes('could not copy') && e.includes('cookie')) || (e.includes('permission denied') && e.includes('cookie')) || e.includes('lockprofilecookiedatabase')) {
+    return 'Browser cookie database is locked because the browser is currently running. Close the browser or select "None" under Settings > Browser Cookies.';
+  }
   if (e.includes('sign in to confirm') || e.includes('not a bot') || e.includes('confirm you')) {
     return 'YouTube Bot Verification Check encountered. Please select your browser (Brave, Firefox, Chrome) under Settings > Browser Cookies, or use a network proxy.';
   }
@@ -217,7 +220,7 @@ class YouTubeAntiBlockManager {
     this.requestTimestamps = [];
     this.cachedWorkingBrowser = null;
     this.lastVerifiedTimestamp = 0;
-    this.candidateBrowsers = ['brave', 'firefox', 'chrome', 'edge', 'opera', 'vivaldi'];
+    this.candidateBrowsers = ['firefox', 'brave', 'chrome', 'edge', 'opera', 'vivaldi'];
   }
 
   recordRequest() {
@@ -245,6 +248,11 @@ class YouTubeAntiBlockManager {
     }
   }
 
+  invalidateWorkingBrowser() {
+    this.cachedWorkingBrowser = null;
+    this.lastVerifiedTimestamp = 0;
+  }
+
   findWorkingBrowser() {
     if (this.cachedWorkingBrowser && (Date.now() - this.lastVerifiedTimestamp < 600000)) {
       return this.cachedWorkingBrowser;
@@ -262,7 +270,12 @@ class YouTubeAntiBlockManager {
           'https://www.youtube.com/robots.txt'
         ], { windowsHide: true, encoding: 'utf8', timeout: 3500 });
 
-        if (testRes.stdout && (testRes.stdout.includes('robots.txt') || testRes.stdout.includes('User-agent'))) {
+        const stderr = (testRes.stderr || '').toLowerCase();
+        if (stderr.includes('could not copy') || stderr.includes('permission denied') || stderr.includes('lockprofilecookiedatabase')) {
+          continue; // Cookie database locked by running browser, skip!
+        }
+
+        if (testRes.stdout && (testRes.stdout.includes('robots.txt') || testRes.stdout.includes('User-agent') || testRes.stdout.includes('Extracted'))) {
           this.cachedWorkingBrowser = b;
           this.lastVerifiedTimestamp = Date.now();
           return b;
@@ -286,11 +299,9 @@ class YouTubeAntiBlockManager {
       antiBlockArgs.push('--sleep-requests', '0.75');
     }
 
+    // Only inject cookies proactively if the user explicitly selected a specific browser.
+    // When 'auto', clean downloads run without cookies to avoid DB locks; bot challenge auto-rescue kicks in dynamically if needed.
     let effectiveBrowser = chosenBrowser;
-    if (!effectiveBrowser || effectiveBrowser === 'auto') {
-      effectiveBrowser = this.getWorkingBrowser() || this.findWorkingBrowser();
-    }
-
     if (effectiveBrowser && effectiveBrowser !== 'none' && effectiveBrowser !== 'auto') {
       antiBlockArgs.push('--cookies-from-browser', effectiveBrowser);
     }
@@ -298,7 +309,7 @@ class YouTubeAntiBlockManager {
     return {
       args: antiBlockArgs,
       isFrequent,
-      effectiveBrowser,
+      effectiveBrowser: (effectiveBrowser !== 'none' && effectiveBrowser !== 'auto') ? effectiveBrowser : null,
     };
   }
 }
@@ -312,7 +323,7 @@ class Downloader {
 
   _isYoutubeUrl(url = '') {
     const u = (url || '').toLowerCase();
-    return u.includes('youtube.com') || u.includes('youtu.be');
+    return u.includes('youtube.com') || u.includes('youtu.be') || u.startsWith('ytsearch');
   }
 
   _isTikTokUrl(url = '') {
@@ -422,10 +433,22 @@ class Downloader {
         if (code !== 0) {
           const errDetail = stderr.trim() || 'Could not fetch metadata for this URL.';
           const lowerErr = errDetail.toLowerCase();
+          const isCookieLock = (lowerErr.includes('could not copy') && lowerErr.includes('cookie')) ||
+                               (lowerErr.includes('permission denied') && lowerErr.includes('cookie')) ||
+                               lowerErr.includes('lockprofilecookiedatabase');
+
+          if (isCookieLock && !isRetry) {
+            this.youtubeAntiBlock.invalidateWorkingBrowser();
+            try {
+              const cleanResult = await this._executeInspectUrl(cleanUrl, { ...options, cookiesBrowser: 'none' }, true);
+              return resolve(cleanResult);
+            } catch (cleanErr) {}
+          }
+
           const isBotCheck = isYoutube && (lowerErr.includes('sign in to confirm') || lowerErr.includes('not a bot') || lowerErr.includes('bot'));
 
           if (isBotCheck && !isRetry) {
-            const fallbackBrowsers = ['brave', 'firefox', 'chrome', 'edge'].filter((b) => b !== activeBrowser);
+            const fallbackBrowsers = ['firefox', 'brave', 'chrome', 'edge'].filter((b) => b !== activeBrowser);
             for (const fb of fallbackBrowsers) {
               try {
                 const rescueResult = await this._executeInspectUrl(cleanUrl, { ...options, cookiesBrowser: fb }, true);
@@ -934,7 +957,7 @@ class Downloader {
       } catch (e) {
         if (onLog) onLog(`[Spotify Warning] Direct track parse failed, attempting standard URL download`);
       }
-    } else if (jobConfig.targetSearch) {
+    } else if (jobConfig.targetSearch || jobConfig.platform === 'spotify' || url.includes('spotify.com/')) {
       isSpotify = true;
     }
 
@@ -956,9 +979,10 @@ class Downloader {
       '--http-chunk-size', '10M'
     );
 
-    // YouTube-Specific Anti-Block Shield (strictly applied ONLY to YouTube sessions)
+    // YouTube / Search Anti-Block & Node.js Engine Optimization
+    // Spotify resolves to YouTube audio search (ytsearch1:...) which runs anonymously and must NEVER pass browser cookies.
     const isYoutube = this._isYoutubeUrl(downloadUrl) || this._isYoutubeUrl(url);
-    const chosenBrowser = customOptions.cookiesBrowser || jobConfig.cookiesBrowser;
+    const chosenBrowser = isSpotify ? 'none' : (customOptions.cookiesBrowser || jobConfig.cookiesBrowser);
 
     if (isYoutube) {
       this.youtubeAntiBlock.recordRequest();
@@ -969,7 +993,7 @@ class Downloader {
         onLog(`[YouTube Shield] Active authenticated session via ${antiBlock.effectiveBrowser} cookies`);
       }
     } else {
-      if (chosenBrowser && chosenBrowser !== 'none' && chosenBrowser !== 'auto') {
+      if (!isSpotify && chosenBrowser && chosenBrowser !== 'none' && chosenBrowser !== 'auto') {
         args.push('--cookies-from-browser', chosenBrowser);
       }
     }
@@ -1081,7 +1105,7 @@ class Downloader {
         args.push('--limit-rate', rateLimit);
       }
 
-      if (cookiesBrowser && cookiesBrowser !== 'none' && cookiesBrowser !== 'auto') {
+      if (!isSpotify && cookiesBrowser && cookiesBrowser !== 'none' && cookiesBrowser !== 'auto') {
         if (!args.includes('--cookies-from-browser')) {
           args.push('--cookies-from-browser', cookiesBrowser);
         }
@@ -1100,7 +1124,7 @@ class Downloader {
     if (jobConfig.globalRateLimit && jobConfig.globalRateLimit !== 'unlimited') {
       args.push('--limit-rate', jobConfig.globalRateLimit);
     }
-    if (jobConfig.cookiesBrowser && jobConfig.cookiesBrowser !== 'none' && jobConfig.cookiesBrowser !== 'auto') {
+    if (!isSpotify && jobConfig.cookiesBrowser && jobConfig.cookiesBrowser !== 'none' && jobConfig.cookiesBrowser !== 'auto') {
       if (!args.includes('--cookies-from-browser')) {
         args.push('--cookies-from-browser', jobConfig.cookiesBrowser);
       }
@@ -1235,6 +1259,27 @@ class Downloader {
           });
         } else {
           const lowerErr = accumulatedStderr.toLowerCase();
+          const isCookieLock = (lowerErr.includes('could not copy') && lowerErr.includes('cookie')) ||
+                               (lowerErr.includes('permission denied') && lowerErr.includes('cookie')) ||
+                               lowerErr.includes('lockprofilecookiedatabase');
+
+          if (isCookieLock && !jobConfig._cookieLockRetried) {
+            this.youtubeAntiBlock.invalidateWorkingBrowser();
+            if (onLog) {
+              onLog('[Cookie Shield] Browser cookie database is locked (browser is currently running). Automatically falling back to clean download without cookies...');
+            }
+            const retryConfig = {
+              ...jobConfig,
+              _cookieLockRetried: true,
+              cookiesBrowser: 'none',
+              customOptions: {
+                ...(jobConfig.customOptions || {}),
+                cookiesBrowser: 'none',
+              },
+            };
+            return this.startDownload(retryConfig, onProgress, onLog).then(resolve).catch(reject);
+          }
+
           const isBotChallenge = isYoutube && (lowerErr.includes('sign in to confirm') || lowerErr.includes('not a bot') || lowerErr.includes('bot'));
           if (isBotChallenge && !jobConfig._botRetried) {
             const workingBrowser = this.youtubeAntiBlock.findWorkingBrowser();

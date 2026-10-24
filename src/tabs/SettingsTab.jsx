@@ -442,7 +442,7 @@ export default function SettingsTab({
           <div className="pref-item">
             <div>
               <div className="pref-name">Default Browser Cookies</div>
-              <div className="pref-desc">Allow bypassing age-verification sign-in restrictions.</div>
+              <div className="pref-desc">Auto-detects browser session on bot challenges. Clean fallback if browser database is locked.</div>
             </div>
             <select
               className="form-select-sm"
