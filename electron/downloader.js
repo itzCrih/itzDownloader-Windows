@@ -617,19 +617,24 @@ class Downloader {
             const entries = entity.trackList.map((track, i) => {
               const trackId = track.uri ? track.uri.replace('spotify:track:', '') : `track_${i}`;
               const trackUrl = `https://open.spotify.com/track/${trackId}`;
-              const artist = track.subtitle || playlistAuthor;
+              const rawArtist = (track.subtitle || (track.artists ? track.artists.map((a) => a.name).join(', ') : playlistAuthor) || '').trim();
+              const isGeneric = !rawArtist || rawArtist.toLowerCase() === 'spotify' || rawArtist.toLowerCase() === 'spotify artist';
+              const artist = isGeneric ? '' : rawArtist;
               const title = track.title || `Track ${i + 1}`;
               const duration = Math.round((track.duration || 0) / 1000);
+              const targetSearch = artist
+                ? `ytsearch1:${artist} - ${title} official audio`
+                : `ytsearch1:${title} official audio`;
 
               return {
                 index: i + 1,
                 id: trackId,
                 title,
-                author: artist,
+                author: artist || 'Unknown Artist',
                 duration,
                 thumbnail: playlistThumbnail,
                 url: trackUrl,
-                targetSearch: `ytsearch1:${artist} - ${title} official audio`,
+                targetSearch,
               };
             });
 
@@ -661,33 +666,137 @@ class Downloader {
   }
 
   async _inspectSpotifyUrl(spotifyUrl) {
-    const oembedUrl = `https://open.spotify.com/oembed?url=${encodeURIComponent(spotifyUrl)}`;
-
     return new Promise((resolve, reject) => {
-      https.get(oembedUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
-        if (res.statusCode !== 200) {
-          return reject(new Error('Could not retrieve Spotify track details. Check if the link is public.'));
+      const trackMatch = spotifyUrl.match(/track\/([a-zA-Z0-9]+)/);
+      const trackId = trackMatch ? trackMatch[1] : null;
+      const embedUrl = trackId
+        ? `https://open.spotify.com/embed/track/${trackId}`
+        : spotifyUrl.replace('open.spotify.com/track/', 'open.spotify.com/embed/track/').split('?')[0];
+
+      https.get(embedUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        },
+      }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          return resolve(this._inspectSpotifyUrl(res.headers.location));
         }
 
         let body = '';
         res.on('data', (d) => { body += d.toString(); });
         res.on('end', () => {
           try {
-            const data = JSON.parse(body);
-            const title = data.title || 'Unknown Title';
-            const author = data.author_name || 'Spotify Artist';
+            let title = '';
+            let author = '';
+            let duration = 0;
+            let thumbnail = null;
+
+            // 1. Try __NEXT_DATA__
+            const idx = body.indexOf('__NEXT_DATA__');
+            if (idx !== -1) {
+              const start = body.indexOf('>', idx) + 1;
+              const end = body.indexOf('</script>', start);
+              const json = JSON.parse(body.slice(start, end));
+              const entity = json.props?.pageProps?.state?.data?.entity;
+              if (entity) {
+                title = entity.name || entity.title || '';
+                if (Array.isArray(entity.artists) && entity.artists.length > 0) {
+                  author = entity.artists.map((a) => a.name).filter(Boolean).join(', ');
+                } else if (entity.subtitle) {
+                  author = entity.subtitle;
+                }
+                duration = Math.round((entity.duration || 0) / 1000);
+                thumbnail = entity.visualIdentity?.image?.[0]?.url || entity.coverArt?.sources?.[0]?.url || null;
+              }
+            }
+
+            // 2. Fallback to HTML meta tags
+            if (!title || !author) {
+              const ogTitleMatch = body.match(/<meta\s+property=["']og:title["']\s+content=["']([^"']+)["']/i);
+              const ogDescMatch = body.match(/<meta\s+property=["']og:description["']\s+content=["']([^"']+)["']/i);
+              const titleTagMatch = body.match(/<title>([^<]+)<\/title>/i);
+
+              if (!title) {
+                title = ogTitleMatch ? ogTitleMatch[1] : (titleTagMatch ? titleTagMatch[1].split(' - ')[0].trim() : 'Unknown Track');
+              }
+
+              if (!author && ogDescMatch) {
+                // Spotify format: "Artist · Album · Song · Year"
+                const parts = ogDescMatch[1].split('·').map((s) => s.trim());
+                if (parts.length > 0 && parts[0]) {
+                  author = parts[0];
+                }
+              }
+
+              if (!author && titleTagMatch && titleTagMatch[1].includes(' by ')) {
+                // Spotify format: "... by Artist | Spotify"
+                const byParts = titleTagMatch[1].split(' by ');
+                if (byParts.length > 1) {
+                  author = byParts[1].split('|')[0].trim();
+                }
+              }
+            }
+
+            // Sanitize author: Never allow generic "Spotify" or "Spotify Artist"
+            const cleanAuthor = (author || '').trim();
+            const isGeneric = !cleanAuthor || cleanAuthor.toLowerCase() === 'spotify' || cleanAuthor.toLowerCase() === 'spotify artist';
+            const validAuthor = isGeneric ? '' : cleanAuthor;
+
+            // Build precision YouTube search query
+            const targetSearch = validAuthor
+              ? `ytsearch1:${validAuthor} - ${title} official audio`
+              : `ytsearch1:${title} official audio`;
 
             resolve({
               url: spotifyUrl,
-              title: title,
-              author: author,
+              title: title || 'Unknown Track',
+              author: validAuthor || 'Unknown Artist',
+              duration,
+              thumbnail,
+              platform: 'spotify',
+              isPlaylist: false,
+              isLive: false,
+              isAudioOnly: true,
+              targetSearch,
+              resolutions: [],
+            });
+          } catch (e) {
+            this._fallbackSpotifyOembed(spotifyUrl).then(resolve).catch(reject);
+          }
+        });
+      }).on('error', (err) => {
+        this._fallbackSpotifyOembed(spotifyUrl).then(resolve).catch(reject);
+      });
+    });
+  }
+
+  async _fallbackSpotifyOembed(spotifyUrl) {
+    const oembedUrl = `https://open.spotify.com/oembed?url=${encodeURIComponent(spotifyUrl)}`;
+    return new Promise((resolve, reject) => {
+      https.get(oembedUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
+        if (res.statusCode !== 200) {
+          return reject(new Error('Could not retrieve Spotify track details. Check if the link is public.'));
+        }
+        let body = '';
+        res.on('data', (d) => { body += d.toString(); });
+        res.on('end', () => {
+          try {
+            const data = JSON.parse(body);
+            const title = data.title || 'Unknown Track';
+            // Do NOT include "Spotify Artist" in search query!
+            const targetSearch = `ytsearch1:${title} official audio`;
+
+            resolve({
+              url: spotifyUrl,
+              title,
+              author: 'Unknown Artist',
               duration: 0,
               thumbnail: data.thumbnail_url || null,
               platform: 'spotify',
               isPlaylist: false,
               isLive: false,
               isAudioOnly: true,
-              targetSearch: `ytsearch1:${author} - ${title} audio`,
+              targetSearch,
               resolutions: [],
             });
           } catch (e) {
@@ -952,13 +1061,19 @@ class Downloader {
       isSpotify = true;
       try {
         const spotifyInfo = await this._inspectSpotifyUrl(url);
-        downloadUrl = spotifyInfo.targetSearch || `ytsearch1:${spotifyInfo.author} - ${spotifyInfo.title} official audio`;
+        downloadUrl = spotifyInfo.targetSearch;
         if (onLog) onLog(`[Spotify Resolver] Found track "${spotifyInfo.title}" by ${spotifyInfo.author}`);
       } catch (e) {
         if (onLog) onLog(`[Spotify Warning] Direct track parse failed, attempting standard URL download`);
       }
     } else if (jobConfig.targetSearch || jobConfig.platform === 'spotify' || url.includes('spotify.com/')) {
       isSpotify = true;
+      if (downloadUrl && downloadUrl.includes('Spotify Artist - ')) {
+        downloadUrl = downloadUrl.replace('Spotify Artist - ', '');
+      }
+      if (onLog && jobConfig.title) {
+        onLog(`[Spotify Engine] Downloading track "${jobConfig.title}" by ${jobConfig.author || 'Artist'}`);
+      }
     }
 
     const args = [
