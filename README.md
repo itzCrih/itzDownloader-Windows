@@ -8,7 +8,7 @@
 The high-performance, private Windows workstation for instant video & audio downloads from YouTube, TikTok, Spotify, Instagram, and over 1,000+ online media platforms.
 
 [![Platform](https://img.shields.io/badge/Platform-Windows_10_%7C_11_(x64)-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/itzCrih/itzDownloader-Windows/releases/latest)
-[![Version](https://img.shields.io/badge/Version-v1.2.10-e6b422?style=for-the-badge)](https://github.com/itzCrih/itzDownloader-Windows/releases/latest)
+[![Version](https://img.shields.io/badge/Version-v1.2.11-e6b422?style=for-the-badge)](https://github.com/itzCrih/itzDownloader-Windows/releases/latest)
 [![Engine](https://img.shields.io/badge/yt--dlp-Native_v2025+-black?style=for-the-badge)](https://github.com/yt-dlp/yt-dlp)
 [![FFmpeg](https://img.shields.io/badge/FFmpeg-v7.1_Native-black?style=for-the-badge)](https://ffmpeg.org)
 [![Signed](https://img.shields.io/badge/Code_Signing-Authenticode_Signed-2ea043?style=for-the-badge&logo=shield&logoColor=white)](certs/)
@@ -16,15 +16,15 @@ The high-performance, private Windows workstation for instant video & audio down
 
 <br />
 
-### Download itzDownloader Desktop (v1.2.10)
+### Download itzDownloader Desktop (v1.2.11)
 
-[![Download Setup](https://img.shields.io/badge/Download_Installer-itzDownloader_Desktop_Setup_(v1.2.10)-e6b422?style=for-the-badge&logo=windows&logoColor=black)](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.2.10/itzDownloader-Desktop-Setup-1.2.10.exe)  
-[![Download Portable](https://img.shields.io/badge/Download_Portable-itzDownloader_Desktop_Portable_(v1.2.10)-ffffff?style=for-the-badge&logo=windows&logoColor=black)](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.2.10/itzDownloader-Desktop-1.2.10-Portable.exe)
+[![Download Setup](https://img.shields.io/badge/Download_Installer-itzDownloader_Desktop_Setup_(v1.2.11)-e6b422?style=for-the-badge&logo=windows&logoColor=black)](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.2.11/itzDownloader-Desktop-Setup-1.2.11.exe)  
+[![Download Portable](https://img.shields.io/badge/Download_Portable-itzDownloader_Desktop_Portable_(v1.2.11)-ffffff?style=for-the-badge&logo=windows&logoColor=black)](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.2.11/itzDownloader-Desktop-1.2.11-Portable.exe)
 
 | Package | Format | Architecture | Direct Link |
 | :--- | :--- | :--- | :--- |
-| **Windows Installer** | NSIS Setup `.exe` | Windows 10 / 11 (x64) | [itzDownloader-Desktop-Setup-1.2.10.exe](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.2.10/itzDownloader-Desktop-Setup-1.2.10.exe) |
-| **Standalone Portable** | Portable `.exe` | Windows 10 / 11 (x64) | [itzDownloader-Desktop-1.2.10-Portable.exe](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.2.10/itzDownloader-Desktop-1.2.10-Portable.exe) |
+| **Windows Installer** | NSIS Setup `.exe` | Windows 10 / 11 (x64) | [itzDownloader-Desktop-Setup-1.2.11.exe](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.2.11/itzDownloader-Desktop-Setup-1.2.11.exe) |
+| **Standalone Portable** | Portable `.exe` | Windows 10 / 11 (x64) | [itzDownloader-Desktop-1.2.11-Portable.exe](https://github.com/itzCrih/itzDownloader-Windows/releases/download/v1.2.11/itzDownloader-Desktop-1.2.11-Portable.exe) |
 
 *Authenticode code signed with DigiCert RFC 3161 timestamps. Built-in Auto-Updater checks for future releases seamlessly on startup.*
 
@@ -32,14 +32,15 @@ The high-performance, private Windows workstation for instant video & audio down
 
 ---
 
-## What's New in v1.2.10
+## What's New in v1.2.11
 
-- 🎯 **100% Accurate Spotify Song Matching & Deep Artist Resolution:** Fixed a critical bug where single Spotify tracks defaulted to "Spotify Artist", ruining YouTube search relevance and downloading wrong songs. Now extracts the exact artist, title, duration, and album art directly from Spotify's embed data, querying YouTube with precision (ytsearch1:Artist - Title official audio) to download the exact song every time.
-- 🎵 **Playlist & Album Artist Sanitization:** Extended high-precision artist resolution across all playlist and album downloads to eliminate generic creator fallbacks.
-- 🔒 **Chromium Cookie Database Lock Auto-Fallback:** Prevents browser SQLite locks from disrupting downloads.
+- 🎬 **100% Adobe After Effects & Premiere Pro Compatibility (Fast Re-encoding Fix):** Resolved an issue where YouTube MP4s downloaded with AV1 video codec appeared invisible/blank when imported into Adobe After Effects or Premiere Pro. Now prioritizes native H.264 & AAC streams directly (-S vcodec:h264,res,acodec:m4a), and runs a post-download hardware-accelerated transcoder (NVENC/QSV/libx264) with yuv420p pixel format whenever AV1/VP9 streams are detected, ensuring flawless timeline editing and playback.
+- 🎯 **100% Accurate Spotify Song Matching & Deep Artist Resolution:** Fixed a critical bug where single Spotify tracks defaulted to "Spotify Artist", ruining YouTube search relevance and downloading wrong songs.
 - 🛡️ **Authenticode Digitally Signed Release:** Both the NSIS Setup installer and standalone Portable executables are fully signed with RFC 3161 timestamping.
 
 ---
+
+## What's New in v1.2.10
 
 ## What's New in v1.2.9
 

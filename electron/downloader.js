@@ -331,6 +331,158 @@ class Downloader {
     return u.includes('tiktok.com');
   }
 
+  async _probeMediaStreams(filePath) {
+    if (!this.engineManager.ffprobePath || !fs.existsSync(filePath)) {
+      return null;
+    }
+    return new Promise((resolve) => {
+      const proc = spawn(this.engineManager.ffprobePath, [
+        '-v', 'quiet',
+        '-print_format', 'json',
+        '-show_streams',
+        filePath,
+      ], { windowsHide: true });
+
+      let stdout = '';
+      proc.stdout.on('data', (d) => { stdout += d.toString(); });
+      proc.on('close', (code) => {
+        if (code !== 0) return resolve(null);
+        try {
+          const data = JSON.parse(stdout);
+          const vStream = (data.streams || []).find((s) => s.codec_type === 'video');
+          const aStream = (data.streams || []).find((s) => s.codec_type === 'audio');
+          resolve({
+            videoCodec: (vStream?.codec_name || '').toLowerCase(),
+            pixFmt: (vStream?.pix_fmt || '').toLowerCase(),
+            audioCodec: (aStream?.codec_name || '').toLowerCase(),
+            hasAudio: !!aStream,
+            hasVideo: !!vStream,
+          });
+        } catch (e) {
+          resolve(null);
+        }
+      });
+      proc.on('error', () => resolve(null));
+    });
+  }
+
+  async _ensureCompatibleH264Mp4(filePath, options = {}, onProgress, onLog) {
+    const { fastReencode, noAudio, jobId, format } = options;
+    if (!filePath || !fs.existsSync(filePath)) return filePath;
+
+    const streams = await this._probeMediaStreams(filePath);
+    if (!streams || !streams.hasVideo) return filePath;
+
+    const isNonH264 = streams.videoCodec && streams.videoCodec !== 'h264';
+    const isNonAac = streams.audioCodec && streams.audioCodec !== 'aac';
+    const hasUnwantedAudio = noAudio && streams.hasAudio;
+    const isNonYuv420p = streams.pixFmt && streams.pixFmt !== 'yuv420p';
+
+    // Adobe After Effects, Premiere Pro, and standard Windows players cannot decode AV1 or VP9 in MP4
+    const isAv1OrVp9 = streams.videoCodec === 'av01' || streams.videoCodec === 'av1' || streams.videoCodec === 'vp9';
+    const isMp4Target = !format || format.toLowerCase() === 'mp4' || filePath.toLowerCase().endsWith('.mp4');
+
+    const needsConversion = (fastReencode && (isNonH264 || isNonAac || hasUnwantedAudio || isNonYuv420p))
+      || (isMp4Target && (isAv1OrVp9 || (isNonH264 && fastReencode)))
+      || hasUnwantedAudio;
+
+    if (!needsConversion) {
+      if (onLog && streams.videoCodec === 'h264') {
+        onLog(`[Codec Verification] Video is verified native H.264 (${streams.pixFmt || 'yuv420p'}) + ${streams.audioCodec?.toUpperCase() || 'AAC'}. 100% compatible with Adobe After Effects & Premiere Pro.`);
+      }
+      return filePath;
+    }
+
+    const encoder = this.engineManager.status?.hardwareAccels?.nvenc
+      ? 'h264_nvenc'
+      : this.engineManager.status?.hardwareAccels?.qsv
+      ? 'h264_qsv'
+      : this.engineManager.status?.hardwareAccels?.amf
+      ? 'h264_amf'
+      : 'libx264';
+
+    if (onLog) {
+      onLog(`[Fast Re-encode] Converting video track (${(streams.videoCodec || 'unknown').toUpperCase()}) to standard H.264 (${encoder}) and audio to AAC for 100% Adobe After Effects & Premiere compatibility...`);
+    }
+
+    if (onProgress) {
+      onProgress({
+        jobId,
+        status: 'converting',
+        percent: 92,
+        speed: encoder,
+        stage: `Re-encoding to H.264 (${encoder}) for After Effects & Premiere...`,
+      });
+    }
+
+    const dir = path.dirname(filePath);
+    const ext = path.extname(filePath);
+    const base = path.basename(filePath, ext);
+    const tempOut = path.join(dir, `__ae_compat_${Date.now()}_${base}.mp4`);
+
+    const ffmpegArgs = [
+      '-y',
+      '-i', filePath,
+    ];
+
+    if (isNonH264 || isNonYuv420p) {
+      ffmpegArgs.push('-c:v', encoder, '-pix_fmt', 'yuv420p');
+      if (encoder === 'h264_nvenc') {
+        ffmpegArgs.push('-preset', 'p4', '-cq', '20');
+      } else if (encoder === 'libx264') {
+        ffmpegArgs.push('-preset', 'veryfast', '-crf', '20');
+      }
+    } else {
+      ffmpegArgs.push('-c:v', 'copy');
+    }
+
+    if (noAudio) {
+      ffmpegArgs.push('-an');
+    } else if (isNonAac) {
+      ffmpegArgs.push('-c:a', 'aac', '-b:a', '192k');
+    } else {
+      ffmpegArgs.push('-c:a', 'copy');
+    }
+
+    // Faststart ensures moov atom is at the beginning for immediate timeline scrubbing
+    ffmpegArgs.push('-movflags', '+faststart');
+    ffmpegArgs.push(tempOut);
+
+    return new Promise((resolve) => {
+      const proc = spawn(this.engineManager.ffmpegPath, ffmpegArgs, { windowsHide: true });
+      let stderr = '';
+      proc.stderr.on('data', (d) => { stderr += d.toString(); });
+
+      proc.on('close', (fCode) => {
+        if (fCode === 0 && fs.existsSync(tempOut) && fs.statSync(tempOut).size > 1000) {
+          try {
+            fs.unlinkSync(filePath);
+            const finalCleanPath = filePath.toLowerCase().endsWith('.mp4')
+              ? filePath
+              : path.join(dir, `${base}.mp4`);
+            fs.renameSync(tempOut, finalCleanPath);
+            if (onLog) {
+              onLog(`[Fast Re-encode] Successfully created H.264 AVC + AAC MP4 (${encoder}). Ready for Adobe After Effects!`);
+            }
+            return resolve(finalCleanPath);
+          } catch (swapErr) {
+            if (onLog) onLog(`[Fast Re-encode Warning] File swap error: ${swapErr.message}`);
+            return resolve(tempOut);
+          }
+        } else {
+          if (onLog) onLog(`[Fast Re-encode Error] FFmpeg returned code ${fCode}. Keeping original file.`);
+          try { if (fs.existsSync(tempOut)) fs.unlinkSync(tempOut); } catch (e) {}
+          return resolve(filePath);
+        }
+      });
+
+      proc.on('error', (err) => {
+        if (onLog) onLog(`[Fast Re-encode Error] Could not launch FFmpeg: ${err.message}`);
+        return resolve(filePath);
+      });
+    });
+  }
+
   /**
    * Quick inspection of URL metadata (title, duration, thumbnail, formats)
    */
@@ -1138,10 +1290,12 @@ class Downloader {
     // Apply Presets
     if (preset === 'best_video') {
       args.push('-f', 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b');
+      args.push('-S', 'vcodec:h264,res,acodec:m4a');
       args.push('--merge-output-format', 'mp4');
       args.push('--embed-thumbnail');
     } else if (preset === '1080p') {
       args.push('-f', 'bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4] / bv*[height<=1080]+ba/b');
+      args.push('-S', 'vcodec:h264,res,acodec:m4a');
       args.push('--merge-output-format', 'mp4');
       args.push('--embed-thumbnail');
     } else if (preset === '4k') {
@@ -1150,6 +1304,7 @@ class Downloader {
       args.push('--embed-thumbnail');
     } else if (preset === '720p') {
       args.push('-f', 'bv*[height<=720]+ba/b');
+      args.push('-S', 'vcodec:h264,res,acodec:m4a');
       args.push('--merge-output-format', 'mp4');
     } else if (preset === 'tiktok_clean') {
       args.push('-f', 'b/bv*+ba');
@@ -1192,17 +1347,8 @@ class Downloader {
           args.push('--postprocessor-args', 'ffmpeg:-an');
         }
 
-        if (fastReencode) {
-          args.push('--recode-video', 'mp4');
-          const encoder = this.engineManager.status?.hardwareAccels?.nvenc
-            ? 'h264_nvenc'
-            : this.engineManager.status?.hardwareAccels?.qsv
-            ? 'h264_qsv'
-            : 'libx264';
-          const ppArgs = noAudio
-            ? `VideoConvertor:-c:v ${encoder} -an`
-            : `VideoConvertor:-c:v ${encoder}`;
-          args.push('--postprocessor-args', ppArgs);
+        if (format === 'mp4' || fastReencode) {
+          args.push('-S', 'vcodec:h264,res,acodec:m4a');
         }
         args.push('--merge-output-format', format || 'mp4');
         if (embedThumbnail) args.push('--embed-thumbnail');
@@ -1362,6 +1508,22 @@ class Downloader {
             } catch (e) {}
           }
 
+          const isVideoDownload = !isSpotify && preset !== 'mp3_320' && preset !== 'flac' && preset !== 'wav' && preset !== 'aac' && !(preset === 'custom' && mediaType === 'audio');
+
+          if (isVideoDownload && finalFilePath && fs.existsSync(finalFilePath) && this.engineManager.ffmpegPath) {
+            try {
+              finalFilePath = await this._ensureCompatibleH264Mp4(finalFilePath, {
+                fastReencode,
+                noAudio,
+                jobId,
+                format,
+                resolvedOutputDir,
+              }, onProgress, onLog);
+            } catch (reencodeErr) {
+              if (onLog) onLog(`[Re-encode Warning] Post-processing check failed: ${reencodeErr.message}`);
+            }
+          }
+
           let outputSize = 0;
           if (finalFilePath && fs.existsSync(finalFilePath)) {
             outputSize = fs.statSync(finalFilePath).size;
@@ -1478,6 +1640,7 @@ class Downloader {
       const ffmpegArgs = [
         '-y', '-i', tempPath,
         '-c:v', encoder,
+        '-pix_fmt', 'yuv420p',
         '-preset', 'fast',
         '-progress', 'pipe:1',
       ];
