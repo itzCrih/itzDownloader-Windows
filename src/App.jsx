@@ -56,8 +56,8 @@ export default function App() {
 
   const [updateState, setUpdateState] = useState({
     status: 'idle',
-    currentVersion: '1.2.11',
-    latestVersion: '1.2.11',
+    currentVersion: '1.2.12',
+    latestVersion: '1.2.12',
     downloadPercent: 0,
     error: null,
   });
@@ -977,7 +977,7 @@ export default function App() {
           </div>
 
           <div>
-            <span style={{ fontFamily: 'var(--font-mono)' }}>itzDownloader Desktop v1.2.11</span>
+            <span style={{ fontFamily: 'var(--font-mono)' }}>itzDownloader Desktop v1.2.12</span>
           </div>
         </footer>
       </div>

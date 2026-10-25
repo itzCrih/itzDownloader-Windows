@@ -345,7 +345,7 @@ class Downloader {
 
       let stdout = '';
       proc.stdout.on('data', (d) => { stdout += d.toString(); });
-      proc.on('close', (code) => {
+      proc.on('close', async (code) => {
         if (code !== 0) return resolve(null);
         try {
           const data = JSON.parse(stdout);
@@ -1494,7 +1494,7 @@ class Downloader {
         if (onLog) onLog(`[stderr] ${text}`);
       });
 
-      proc.on('close', (code) => {
+      proc.on('close', async (code) => {
         if (convertingInterval) clearInterval(convertingInterval);
         this.activeJobs.delete(jobId);
 
@@ -1614,7 +1614,7 @@ class Downloader {
           '-an',
           mutePath,
         ], { windowsHide: true });
-        proc.on('close', (code) => {
+        proc.on('close', async (code) => {
           try { fs.unlinkSync(tempPath); } catch (e) {}
           if (code === 0 && fs.existsSync(mutePath)) {
             if (fs.existsSync(finalPath)) try { fs.unlinkSync(finalPath); } catch (e) {}
@@ -1697,7 +1697,7 @@ class Downloader {
           }
         });
 
-        proc.on('close', (code) => {
+        proc.on('close', async (code) => {
           clearInterval(tickTimer);
           try { fs.unlinkSync(tempPath); } catch (e) {}
           if (code === 0 && fs.existsSync(reencodePath)) {
@@ -1768,7 +1768,7 @@ class Downloader {
 
       await new Promise((res, rej) => {
         const proc = spawn(this.engineManager.ffmpegPath, ffmpegArgs, { windowsHide: true });
-        proc.on('close', (code) => {
+        proc.on('close', async (code) => {
           clearInterval(audioTimer);
           try { fs.unlinkSync(tempPath); } catch (e) {}
           if (code === 0 && fs.existsSync(finalPath)) res();
