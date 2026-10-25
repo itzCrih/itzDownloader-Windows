@@ -34,96 +34,84 @@ The high-performance, private Windows workstation for instant video & audio down
 
 ## What's New in v1.2.12
 
-- ⚡ **Hotfix for Startup / Boot Error:** Fixed a `SyntaxError: await is only valid in async functions` in the downloader process completion handler introduced during the v1.2.11 stream compatibility patch, restoring 100% stable application launch and execution.
-- 🎬 **Full After Effects & Premiere H.264 MP4 Compatibility:** Preserves native stream prioritization (`-S vcodec:h264,res,acodec:m4a`) and GPU-accelerated transcoding (`h264_nvenc`, `h264_qsv`, `libx264` + `yuv420p` + `aac`) when Fast Re-encoding is enabled or non-standard AV1/VP9 codecs are detected.
+- **Startup Boot Hotfix:** Fixed a `SyntaxError: await is only valid in async functions` in the downloader process completion handler introduced during the stream compatibility patch, restoring 100% stable application launch and execution.
+- **Full Adobe After Effects & Premiere Pro Compatibility (Fast Re-encoding):** Resolved an issue where YouTube MP4s downloaded with AV1 video codec appeared invisible/blank when imported into Adobe After Effects or Premiere Pro. Now prioritizes native H.264 & AAC streams directly (`-S vcodec:h264,res,acodec:m4a`), and runs a post-download hardware-accelerated transcoder (NVENC/QSV/libx264) with `yuv420p` pixel format whenever AV1/VP9 streams are detected, ensuring flawless timeline editing and playback.
+- **Accurate Spotify Song Matching & Deep Artist Resolution:** Fixed a critical bug where single Spotify tracks defaulted to "Spotify Artist", ruining YouTube search relevance and downloading wrong songs. Real artist names are parsed directly via Spotify oEmbed metadata and title scraping.
+- **Authenticode Digitally Signed Release:** Both the NSIS Setup installer and standalone Portable executables are fully signed with RFC 3161 timestamping.
 
 ---
-
-## What's New in v1.2.11
-
-- 🎬 **100% Adobe After Effects & Premiere Pro Compatibility (Fast Re-encoding Fix):** Resolved an issue where YouTube MP4s downloaded with AV1 video codec appeared invisible/blank when imported into Adobe After Effects or Premiere Pro. Now prioritizes native H.264 & AAC streams directly (-S vcodec:h264,res,acodec:m4a), and runs a post-download hardware-accelerated transcoder (NVENC/QSV/libx264) with yuv420p pixel format whenever AV1/VP9 streams are detected, ensuring flawless timeline editing and playback.
-- 🎯 **100% Accurate Spotify Song Matching & Deep Artist Resolution:** Fixed a critical bug where single Spotify tracks defaulted to "Spotify Artist", ruining YouTube search relevance and downloading wrong songs.
-- 🛡️ **Authenticode Digitally Signed Release:** Both the NSIS Setup installer and standalone Portable executables are fully signed with RFC 3161 timestamping.
-
----
-
-## What's New in v1.2.10
-
-## What's New in v1.2.9
-
-## What's New in v1.2.8
 
 ## What's New in v1.2.7
 
-- 🚀 **Parallel Multi-Downloading Worker Pool:** Queue and playlist items can now download concurrently in parallel! The engine dynamically scales concurrency based on device hardware performance (`navigator.hardwareConcurrency`: 1 simultaneous stream on low-end/battery saver devices, 2 on mid-range, 3 on high-performance multi-core workstations). Users can also manually lock concurrency (Auto, 1, 2, or 3) in Settings.
-- ⚡ **Speed Fluctuation Stabilization & Fragment Acceleration:** Applied `--concurrent-fragments 4`, `--buffer-size 64K`, and `--http-chunk-size 10M` to all engine jobs. Completely resolves bandwidth dips during fragmented HLS streams (e.g. YouTube visionos/live manifests) and smooths Google Video CDN rate pacing.
-- 🛡️ **YouTube-Specific Anti-Block Shield:** Engineered an automated shield strictly for YouTube sessions to safeguard against bot detection and 429 rate limits during rapid downloading. Detects frequent usage and dynamically rotates player client profiles (`android,web`, `ios,web`, `mweb,web`, `web_creator,web`) and browser user-agents while applying gentle jitter delays and automated 429 backoff retries.
-- 🌐 **Network Proxy Configuration in Settings:** Added dedicated GUI settings to configure HTTP, HTTPS, SOCKS4, and SOCKS5 proxies. Features a one-click toggle switch, custom address input, password redaction in debug logs, and local persistence. Disabled and empty by default.
-- 🛡️ **Authenticode Digitally Signed Release:** Both the NSIS Setup installer and standalone Portable executables are fully signed with RFC 3161 timestamping.
+- **Parallel Multi-Downloading Worker Pool:** Queue and playlist items can now download concurrently in parallel! The engine dynamically scales concurrency based on device hardware performance (`navigator.hardwareConcurrency`: 1 simultaneous stream on low-end/battery saver devices, 2 on mid-range, 3 on high-performance multi-core workstations). Users can also manually lock concurrency (Auto, 1, 2, or 3) in Settings.
+- **Speed Fluctuation Stabilization & Fragment Acceleration:** Applied `--concurrent-fragments 4`, `--buffer-size 64K`, and `--http-chunk-size 10M` to all engine jobs. Completely resolves bandwidth dips during fragmented HLS streams (e.g. YouTube visionos/live manifests) and smooths Google Video CDN rate pacing.
+- **YouTube-Specific Anti-Block Shield:** Engineered an automated shield strictly for YouTube sessions to safeguard against bot detection and 429 rate limits during rapid downloading. Detects frequent usage and dynamically rotates player client profiles (`android,web`, `ios,web`, `mweb,web`, `web_creator,web`) and browser user-agents while applying gentle jitter delays and automated 429 backoff retries.
+- **Network Proxy Configuration in Settings:** Added dedicated GUI settings to configure HTTP, HTTPS, SOCKS4, and SOCKS5 proxies. Features a one-click toggle switch, custom address input, password redaction in debug logs, and local persistence. Disabled and empty by default.
+- **Authenticode Digitally Signed Release:** Both the NSIS Setup installer and standalone Portable executables are fully signed with RFC 3161 timestamping.
 
 ---
 
 ## What's New in v1.2.6
 
-- 🔄 **Sequential Playlist Download Chain Fix:** Completely re-engineered the playlist sequential chain in the event loop. In v1.2.5, React 18 concurrent update batching caused the queue to freeze at item 2 after item 1 finished because the next item invocation was executed outside the asynchronous updater before state resolved. Playlist state updates and next-item dispatching are now fully synchronous and decoupled from React's internal updater queue, with a dedicated process-cleanup interval ensuring all previous process file locks are freed.
-- ⚡ **Zero-Stall Fallback Mechanism:** Added automatic process fallback safeguards in `startNextPlaylistItem`. If any individual playlist item encounters an unhandled OS spawn error or immediate rejection, the queue automatically advances to the next item instead of stalling.
-- 🛡️ **Authenticode Digitally Signed Release:** Both the NSIS Setup installer and standalone Portable executables are fully signed with RFC 3161 timestamping.
+- **Sequential Playlist Download Chain Fix:** Completely re-engineered the playlist sequential chain in the event loop. In v1.2.5, React 18 concurrent update batching caused the queue to freeze at item 2 after item 1 finished because the next item invocation was executed outside the asynchronous updater before state resolved. Playlist state updates and next-item dispatching are now fully synchronous and decoupled from React's internal updater queue, with a dedicated process-cleanup interval ensuring all previous process file locks are freed.
+- **Zero-Stall Fallback Mechanism:** Added automatic process fallback safeguards in `startNextPlaylistItem`. If any individual playlist item encounters an unhandled OS spawn error or immediate rejection, the queue automatically advances to the next item instead of stalling.
+- **Authenticode Digitally Signed Release:** Both the NSIS Setup installer and standalone Portable executables are fully signed with RFC 3161 timestamping.
 
 ---
 
 ## What's New in v1.2.5
 
-- 🔄 **Playlist Download Freeze Fix:** Resolved an asynchronous React state reference issue where queueing a playlist caused item 1 to stall indefinitely at 0% / `DOWNLOADING (0/N)` without spawning the backend download process. Playlist jobs now immediately launch item 1 with guaranteed synchronous reference passing and reliable queue chaining.
-- 🎬 **Dynamic Contextual Terminology ("Videos" vs. "Songs"):** UI now intelligently adapts terminology based on the selected media format and preset.
+- **Playlist Download Freeze Fix:** Resolved an asynchronous React state reference issue where queueing a playlist caused item 1 to stall indefinitely at 0% / `DOWNLOADING (0/N)` without spawning the backend download process. Playlist jobs now immediately launch item 1 with guaranteed synchronous reference passing and reliable queue chaining.
+- **Dynamic Contextual Terminology ("Videos" vs. "Songs"):** UI now intelligently adapts terminology based on the selected media format and preset.
   - Video formats (MP4, 1080p, 4K, 720p, etc.) dynamically display **"Videos in Queue"**, **"Download Playlist (N Videos)"**, and **"Playlist • N videos"**.
   - Audio presets (MP3 320k, FLAC, WAV, AAC, Opus) dynamically display **"Songs"** or **"Tracks"**.
-- 🛡️ **Clean URL Isolation & Path Resilience:** YouTube playlist items extract isolated single video URLs (`watch?v=ID`) to eliminate recursive playlist extraction overhead, and the engine includes robust default output folder fallbacks.
-- 🛡️ **Authenticode Digitally Signed Release:** Both the NSIS Setup installer and standalone Portable executables are fully signed with RFC 3161 timestamping.
+- **Clean URL Isolation & Path Resilience:** YouTube playlist items extract isolated single video URLs (`watch?v=ID`) to eliminate recursive playlist extraction overhead, and the engine includes robust default output folder fallbacks.
+- **Authenticode Digitally Signed Release:** Both the NSIS Setup installer and standalone Portable executables are fully signed with RFC 3161 timestamping.
 
 ---
 
 ## What's New in v1.2.4
 
-- 🎵 **Full Playlist & Album Support for YouTube & Spotify:**
+- **Full Playlist & Album Support for YouTube & Spotify:**
   - **YouTube & Spotify Playlists in Queue:** Real-time playlist cards in the Download Queue showing overall progress, current song title, and an expandable list of all songs in the queue with live speeds and progress percentages.
   - **Single vs Playlist Selector:** When pasting a video playing inside a playlist (`watch?v=...&list=...`), you can now choose between downloading the entire playlist or strictly the single video, preventing unintended background loops of hundreds of songs.
   - **Per-Song Action Controls:** Completed tracks inside a playlist card feature individual "Play" and "Folder" buttons, with graceful skipping if an individual song is geo-blocked or removed.
   - **Spotify Playlists & Albums:** Direct metadata extraction from Spotify playlists and albums without needing API credentials.
-- 📋 **Copiable Terminal & Console Logs:**
+- **Copiable Terminal & Console Logs:**
   - Added a dedicated 1-click **"Copy Logs"** button in the engine logs accordion with instant visual confirmation and toast feedback.
   - Enabled native cursor text selection across all terminal lines (`user-select: text !important`), eliminating the need to take screenshots of error logs.
-- 🛡️ **Authenticode Digitally Signed Release:** Both the NSIS Setup installer and standalone Portable executables are fully signed with RFC 3161 timestamping.
+- **Authenticode Digitally Signed Release:** Both the NSIS Setup installer and standalone Portable executables are fully signed with RFC 3161 timestamping.
 
 ---
 
 ## What's New in v1.2.3
 
-- 🚀 **Blazing-Fast Startup Speed (Reduced from 6s to 2-3s):** Re-engineered the initialization lifecycle to mirror `itzCut Desktop`. Chromium browser and Vite bundle are now launched concurrently with background engine detection, eliminating the 3-second serial block.
-- ⚡ **Persistent Hardware & GPU Cache:** GPU specifications (e.g. RTX 3050 Laptop), CPU specs, and hardware acceleration encoder support (`NVENC`, `QSV`, `AMF`) are cached in `hardware-cache.json`, achieving sub-millisecond instant engine verification on startup.
-- 🔒 **Comprehensive Anti-Crash Click Locks:**
+- **Blazing-Fast Startup Speed (Reduced from 6s to 2-3s):** Re-engineered the initialization lifecycle to mirror `itzCut Desktop`. Chromium browser and Vite bundle are now launched concurrently with background engine detection, eliminating the 3-second serial block.
+- **Persistent Hardware & GPU Cache:** GPU specifications (e.g. RTX 3050 Laptop), CPU specs, and hardware acceleration encoder support (`NVENC`, `QSV`, `AMF`) are cached in `hardware-cache.json`, achieving sub-millisecond instant engine verification on startup.
+- **Comprehensive Anti-Crash Click Locks:**
   - Initial splash window is completely click-proof and non-interactive (`pointer-events: none !important`, `focusable: false`) to prevent DWM drag/close race conditions and access violations.
   - Active operations (core engine installation of yt-dlp/ffmpeg, and application updates downloading/installing) lock all user interactions with a modal overlay and global event capture, safeguarding binary writing and preventing app crashes.
-- 🛡️ **Authenticode Digitally Signed Release:** Both the NSIS Setup installer and standalone Portable executables are fully signed with RFC 3161 timestamping.
+- **Authenticode Digitally Signed Release:** Both the NSIS Setup installer and standalone Portable executables are fully signed with RFC 3161 timestamping.
 
 ---
 
 ## What's New in v1.2.2
 
-- 🛠️ **Fixed Advanced Tab Crash (`videoContainer is not defined`):** Fixed critical variable reference error on the Advanced configuration tab so all custom video containers (MP4, MKV, WebM) render and operate properly without triggering the Error Boundary.
-- 🎨 **Splash Screen Ghosting & Opacity Fix:** Eliminated transparent DWM window composition issues on Windows where the startup splash window could render with very low or washed-out opacity.
-- ✨ **Golden Logo Glow Fix:** Fixed the splash screen glow getting cut off in half by restructuring the background radial gradient to emanate directly from the center of the logo and smoothly feather out across the entire card.
-- 🛡️ **Authenticode Digitally Signed Release:** Both the NSIS Setup installer and standalone Portable executables are fully signed with RFC 3161 timestamping.
+- **Fixed Advanced Tab Crash (`videoContainer is not defined`):** Fixed critical variable reference error on the Advanced configuration tab so all custom video containers (MP4, MKV, WebM) render and operate properly without triggering the Error Boundary.
+- **Splash Screen Ghosting & Opacity Fix:** Eliminated transparent DWM window composition issues on Windows where the startup splash window could render with very low or washed-out opacity.
+- **Golden Logo Glow Fix:** Fixed the splash screen glow getting cut off in half by restructuring the background radial gradient to emanate directly from the center of the logo and smoothly feather out across the entire card.
+- **Authenticode Digitally Signed Release:** Both the NSIS Setup installer and standalone Portable executables are fully signed with RFC 3161 timestamping.
 
 ---
 
 ## What's New in v1.2.1
 
-- 🎯 **Custom Resolution Text Input (Advanced Mode):** Full flexibility to input exact custom resolutions (e.g. `1920x1080`, `1080x1920` for vertical TikTok / Shorts, `2560x1440`, `1080p`, `720`), with 1-click preset chips for quick dimension filling.
-- 🛡️ **Authenticode Digitally Signed Executables:** All installer and portable `.exe` packages are signed with publisher certificate and RFC 3161 timestamps to prevent unknown publisher warnings.
-- ⚡ **Instant Loading Splash Screen:** Ultra-fast startup with an immediate, branded frameless splash window so you never have to wait or wonder if the app is launching.
-- 🔄 **Smart Binary Reuse (itzCut Ecosystem):** itzDownloader automatically detects sibling `itzCut Desktop` installations and reuses existing FFmpeg and encoder binaries directly without redundant re-downloads.
-- 🔒 **Mandatory Engine Probe & Safe UI Lock:** yt-dlp and FFmpeg are verified automatically on every launch. During binary setups or updates, user interactions are safely locked to prevent race conditions and crashes.
-- 📊 **Live Re-Encoding Progress (Fixed 99% Stuck):** FFmpeg conversions and stream muxing now feature dynamic real-time progress bars with active stage feedback, FPS, and speed indicators.
+- **Custom Resolution Text Input (Advanced Mode):** Full flexibility to input exact custom resolutions (e.g. `1920x1080`, `1080x1920` for vertical TikTok / Shorts, `2560x1440`, `1080p`, `720`), with 1-click preset chips for quick dimension filling.
+- **Authenticode Digitally Signed Executables:** All installer and portable `.exe` packages are signed with publisher certificate and RFC 3161 timestamps to prevent unknown publisher warnings.
+- **Instant Loading Splash Screen:** Ultra-fast startup with an immediate, branded frameless splash window so you never have to wait or wonder if the app is launching.
+- **Smart Binary Reuse (itzCut Ecosystem):** itzDownloader automatically detects sibling `itzCut Desktop` installations and reuses existing FFmpeg and encoder binaries directly without redundant re-downloads.
+- **Mandatory Engine Probe & Safe UI Lock:** yt-dlp and FFmpeg are verified automatically on every launch. During binary setups or updates, user interactions are safely locked to prevent race conditions and crashes.
+- **Live Re-Encoding Progress (Fixed 99% Stuck):** FFmpeg conversions and stream muxing now feature dynamic real-time progress bars with active stage feedback, FPS, and speed indicators.
 
 ---
 
@@ -132,7 +120,7 @@ The high-performance, private Windows workstation for instant video & audio down
 - **100% Local & Private Processing:** All streams are fetched directly to your machine. No proxy servers intercepting your traffic, no third-party logging, no accounts required.
 - **Instant Launch & Zero Overhead:** Clean memory footprint, instant startup, and zero background telemetry or bloatware.
 - **Dual-Mode Workflow:**
-  - **Instant Mode:** Paste link $\rightarrow$ auto-detect platform $\rightarrow$ 1-click download with optimized presets (Best MP4, 1080p, MP3 320k, Studio FLAC, TikTok Clean).
+  - **Instant Mode:** Paste link -> auto-detect platform -> 1-click download with optimized presets (Best MP4, 1080p, MP3 320k, Studio FLAC, TikTok Clean).
   - **Media Studio:** Full granular control over containers (MP4, MKV, WebM), resolution caps (4K UHD to 480p), audio codecs, subtitle embedding, and browser cookies.
 - **Spotify Smart Audio Resolver:** Paste any Spotify track link to query song metadata via Spotify oEmbed and automatically fetch high-fidelity audio with embedded album cover art and ID3 tags.
 - **Zero Configuration Required:** Automatically probes your system, identifies dedicated GPUs and CPUs, verifies hardware capabilities, and downloads static `yt-dlp` and `FFmpeg` essentials automatically if missing.
