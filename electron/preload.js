@@ -1,4 +1,15 @@
-const { contextBridge, ipcRenderer, webUtils, clipboard } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
+
+/**
+ * Subscribe helper: returns an unsubscribe function so React effects can clean up.
+ */
+function subscribe(channel) {
+  return (callback) => {
+    const listener = (_event, data) => callback(data);
+    ipcRenderer.on(channel, listener);
+    return () => ipcRenderer.removeListener(channel, listener);
+  };
+}
 
 contextBridge.exposeInMainWorld('itzDownloaderAPI', {
   // Safe dropped file path resolver for modern Electron
@@ -8,7 +19,7 @@ contextBridge.exposeInMainWorld('itzDownloaderAPI', {
         return webUtils.getPathForFile(file);
       }
     } catch (e) {}
-    return file?.path || '';
+    return '';
   },
 
   // Window controls
@@ -23,23 +34,12 @@ contextBridge.exposeInMainWorld('itzDownloaderAPI', {
   openFile: (filePath) => ipcRenderer.invoke('shell:openFile', filePath),
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
   getDefaultOutputDir: () => ipcRenderer.invoke('app:getDefaultOutputDir'),
+  getAppVersion: () => ipcRenderer.invoke('app:getVersion'),
+  notify: (payload) => ipcRenderer.invoke('app:notify', payload),
 
-  // Clipboard helper
-  readClipboard: () => {
-    try {
-      return clipboard.readText();
-    } catch (e) {
-      return '';
-    }
-  },
-  writeClipboard: (text) => {
-    try {
-      clipboard.writeText(text);
-      return true;
-    } catch (e) {
-      return false;
-    }
-  },
+  // Clipboard (handled in the main process so the renderer can stay sandboxed)
+  readClipboard: () => ipcRenderer.invoke('clipboard:read'),
+  writeClipboard: (text) => ipcRenderer.invoke('clipboard:write', text),
 
   // Engine Status & Auto-Downloads (yt-dlp + FFmpeg)
   getEngineStatus: (force = false) => ipcRenderer.invoke('engine:getStatus', force),
@@ -47,16 +47,8 @@ contextBridge.exposeInMainWorld('itzDownloaderAPI', {
   updateYtDlp: () => ipcRenderer.invoke('engine:updateYtDlp'),
   downloadFfmpeg: () => ipcRenderer.invoke('engine:downloadFfmpeg'),
   ensureAllEngines: () => ipcRenderer.invoke('engine:ensureAll'),
-  onEngineDownloadProgress: (callback) => {
-    const listener = (event, data) => callback(data);
-    ipcRenderer.on('engine:download-progress', listener);
-    return () => ipcRenderer.removeListener('engine:download-progress', listener);
-  },
-  onEngineInstallProgress: (callback) => {
-    const listener = (event, data) => callback(data);
-    ipcRenderer.on('engine:install-progress', listener);
-    return () => ipcRenderer.removeListener('engine:install-progress', listener);
-  },
+  onEngineDownloadProgress: subscribe('engine:download-progress'),
+  onEngineInstallProgress: subscribe('engine:install-progress'),
 
   // URL Inspection (metadata, formats, thumbnail, resolutions)
   inspectUrl: (url, options) => ipcRenderer.invoke('media:inspectUrl', { url, options }),
@@ -66,48 +58,17 @@ contextBridge.exposeInMainWorld('itzDownloaderAPI', {
   cancelJob: (jobId) => ipcRenderer.invoke('job:cancel', jobId),
 
   // Realtime Events
-  onJobProgress: (callback) => {
-    const listener = (event, data) => callback(data);
-    ipcRenderer.on('job:progress', listener);
-    return () => ipcRenderer.removeListener('job:progress', listener);
-  },
-  onJobComplete: (callback) => {
-    const listener = (event, data) => callback(data);
-    ipcRenderer.on('job:complete', listener);
-    return () => ipcRenderer.removeListener('job:complete', listener);
-  },
-  onJobError: (callback) => {
-    const listener = (event, data) => callback(data);
-    ipcRenderer.on('job:error', listener);
-    return () => ipcRenderer.removeListener('job:error', listener);
-  },
-  onJobCanceled: (callback) => {
-    const listener = (event, data) => callback(data);
-    ipcRenderer.on('job:canceled', listener);
-    return () => ipcRenderer.removeListener('job:canceled', listener);
-  },
-  onJobLog: (callback) => {
-    const listener = (event, data) => callback(data);
-    ipcRenderer.on('job:log', listener);
-    return () => ipcRenderer.removeListener('job:log', listener);
-  },
+  onJobProgress: subscribe('job:progress'),
+  onJobComplete: subscribe('job:complete'),
+  onJobError: subscribe('job:error'),
+  onJobCanceled: subscribe('job:canceled'),
+  // Logs arrive batched: [{ jobId, lines: string[] }]
+  onJobLog: subscribe('job:log-batch'),
 
   // Auto-Updater
   checkForUpdates: () => ipcRenderer.invoke('update:check'),
   quitAndInstallUpdate: () => ipcRenderer.invoke('update:quitAndInstall'),
-  onUpdateStatus: (callback) => {
-    const listener = (event, data) => callback(data);
-    ipcRenderer.on('update:status', listener);
-    return () => ipcRenderer.removeListener('update:status', listener);
-  },
-  onUpdateDownloadProgress: (callback) => {
-    const listener = (event, data) => callback(data);
-    ipcRenderer.on('update:download-progress', listener);
-    return () => ipcRenderer.removeListener('update:download-progress', listener);
-  },
-  onUpdateDownloaded: (callback) => {
-    const listener = (event, data) => callback(data);
-    ipcRenderer.on('update:downloaded', listener);
-    return () => ipcRenderer.removeListener('update:downloaded', listener);
-  },
+  onUpdateStatus: subscribe('update:status'),
+  onUpdateDownloadProgress: subscribe('update:download-progress'),
+  onUpdateDownloaded: subscribe('update:downloaded'),
 });

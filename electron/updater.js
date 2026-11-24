@@ -1,10 +1,22 @@
 const https = require('https');
-const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { spawn } = require('child_process');
 const { app } = require('electron');
+
+// Updates are only ever fetched over HTTPS from GitHub-owned hosts.
+const TRUSTED_UPDATE_HOSTS = ['github.com', 'api.github.com', 'objects.githubusercontent.com', 'release-assets.githubusercontent.com'];
+
+function isTrustedUpdateUrl(rawUrl) {
+  try {
+    const u = new URL(rawUrl);
+    const host = u.hostname.toLowerCase();
+    return u.protocol === 'https:' && (TRUSTED_UPDATE_HOSTS.includes(host) || host.endsWith('.githubusercontent.com'));
+  } catch (e) {
+    return false;
+  }
+}
 
 class AutoUpdater {
   constructor(mainWindow = null) {
@@ -71,6 +83,7 @@ class AutoUpdater {
           releaseNotes: release.body || 'New features and improvements.',
           downloadUrl,
           assetName: setupAsset ? setupAsset.name : null,
+          assetSize: setupAsset ? setupAsset.size : 0,
           releaseUrl: release.html_url,
         };
 
@@ -120,6 +133,10 @@ class AutoUpdater {
           return resolve(null);
         }
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          res.resume();
+          if (!isTrustedUpdateUrl(res.headers.location)) {
+            return reject(new Error('Untrusted update redirect.'));
+          }
           return https.get(res.headers.location, { headers: options.headers }, (redirRes) => {
             let data = '';
             redirRes.on('data', (c) => (data += c));
@@ -167,6 +184,14 @@ class AutoUpdater {
         this.send('update:download-progress', progress);
       });
 
+      // Integrity check: the installer must match the size GitHub reports for the asset
+      const expectedSize = this.updateInfo.assetSize || 0;
+      const actualSize = (await fs.promises.stat(targetPath)).size;
+      if (expectedSize > 0 && actualSize !== expectedSize) {
+        await fs.promises.unlink(targetPath).catch(() => {});
+        throw new Error('Downloaded installer is incomplete or corrupted.');
+      }
+
       this.isDownloading = false;
       this.send('update:downloaded', {
         filePath: targetPath,
@@ -183,14 +208,20 @@ class AutoUpdater {
       return Promise.reject(new Error('Too many redirects while downloading update.'));
     }
 
+    if (!isTrustedUpdateUrl(url)) {
+      return Promise.reject(new Error('Refusing to download update from an untrusted host.'));
+    }
+
     return new Promise((resolve, reject) => {
-      const protocol = url.startsWith('https') ? https : http;
-      const req = protocol.get(url, { headers: { 'User-Agent': 'itzDownloader-Desktop' } }, (res) => {
+      const req = https.get(url, { headers: { 'User-Agent': 'itzDownloader-Desktop' } }, (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          return resolve(this.downloadFile(res.headers.location, dest, onProgress, redirectCount + 1));
+          res.resume();
+          const nextUrl = new URL(res.headers.location, url).toString();
+          return resolve(this.downloadFile(nextUrl, dest, onProgress, redirectCount + 1));
         }
 
         if (res.statusCode !== 200) {
+          res.resume();
           return reject(new Error(`Failed to download update: HTTP ${res.statusCode}`));
         }
 
@@ -226,6 +257,9 @@ class AutoUpdater {
       req.on('error', (err) => {
         fs.unlink(dest, () => {});
         reject(err);
+      });
+      req.setTimeout(30000, () => {
+        req.destroy(new Error('Update download timed out.'));
       });
     });
   }

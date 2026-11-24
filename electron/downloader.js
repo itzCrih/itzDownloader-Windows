@@ -1,5 +1,6 @@
-const { spawn, execSync, spawnSync } = require('child_process');
+const { spawn, execFile } = require('child_process');
 const path = require('path');
+const os = require('os');
 const fs = require('fs');
 const https = require('https');
 const http = require('http');
@@ -161,6 +162,100 @@ function validateMediaUrl(targetUrl = '') {
   return { isValid: true };
 }
 
+function isCookieLockError(lowerErr = '') {
+  return (lowerErr.includes('could not copy') && lowerErr.includes('cookie'))
+    || (lowerErr.includes('permission denied') && lowerErr.includes('cookie'))
+    || lowerErr.includes('lockprofilecookiedatabase');
+}
+
+const ALLOWED_COOKIE_BROWSERS = new Set(['brave', 'firefox', 'chrome', 'edge', 'opera', 'vivaldi', 'chromium']);
+const ALLOWED_RATE_LIMIT = /^\d{1,4}(\.\d{1,2})?[KMG]$/i;
+const ALLOWED_PROXY = /^(https?|socks4a?|socks5h?):\/\/[^\s"'`]+$/i;
+
+function sanitizeBrowser(browser) {
+  const b = (browser || '').toString().toLowerCase().trim();
+  return ALLOWED_COOKIE_BROWSERS.has(b) ? b : null;
+}
+
+function sanitizeRateLimit(limit) {
+  const l = (limit || '').toString().trim();
+  return ALLOWED_RATE_LIMIT.test(l) ? l : null;
+}
+
+function sanitizeProxy(proxy) {
+  const p = (proxy || '').toString().trim();
+  return ALLOWED_PROXY.test(p) ? p : null;
+}
+
+// Flags that can execute programs, load code, read/write arbitrary files or
+// redirect output outside the chosen folder. Blocked in user-supplied extra args.
+const BLOCKED_EXTRA_FLAGS = [
+  '--exec', '--exec-before-download', '--no-exec',
+  '--config-location', '--config-locations', '--ignore-config',
+  '--plugin-dirs', '--no-plugin-dirs',
+  '--netrc-cmd', '--netrc-location', '--netrc',
+  '--downloader', '--external-downloader', '--downloader-args', '--external-downloader-args',
+  '--ffmpeg-location', '--use-postprocessor', '--postprocessor-args', '--ppa',
+  '--batch-file', '-a', '--load-info-json',
+  '--cookies', '--cookies-from-browser',
+  '-o', '--output', '-P', '--paths', '--output-na-placeholder',
+  '--download-archive', '--cache-dir', '--alias', '--update', '-U', '--update-to',
+  '--print-to-file', '--write-link', '--proxy',
+];
+
+function parseExtraArgs(raw = '') {
+  if (!raw || typeof raw !== 'string') return [];
+  // Tokenize respecting simple double/single quotes
+  const tokens = raw.match(/"[^"]*"|'[^']*'|\S+/g) || [];
+  const cleaned = tokens.map((t) => t.replace(/^(["'])(.*)\1$/, '$2')).slice(0, 40);
+  const out = [];
+  for (let i = 0; i < cleaned.length; i++) {
+    const tok = cleaned[i];
+    const flag = tok.split('=')[0].toLowerCase();
+    if (tok.startsWith('-')) {
+      if (BLOCKED_EXTRA_FLAGS.includes(flag) || flag.startsWith('--exec')) {
+        // Skip the blocked flag *and* its value so the value is never treated as a URL
+        if (!tok.includes('=') && cleaned[i + 1] && !cleaned[i + 1].startsWith('-')) i++;
+        continue;
+      }
+      out.push(tok);
+    } else if (out.length > 0 && !/:\/\/|^ytsearch/i.test(tok)) {
+      // Value for the previous allowed flag. URLs are rejected so extra args
+      // can never smuggle in a non-whitelisted download target.
+      out.push(tok);
+    }
+  }
+  return out;
+}
+
+const FILENAME_TEMPLATES = {
+  title_id: '%(title).180B [%(id)s].%(ext)s',
+  title: '%(title).200B.%(ext)s',
+  uploader_title: '%(uploader,channel,creator|Unknown).60B - %(title).160B.%(ext)s',
+  date_title: '%(upload_date>%Y-%m-%d|Unknown)s - %(title).180B.%(ext)s',
+};
+
+const PLATFORM_FOLDER_NAMES = {
+  youtube: 'YouTube', tiktok: 'TikTok', spotify: 'Spotify', instagram: 'Instagram', twitter: 'Twitter',
+  soundcloud: 'SoundCloud', twitch: 'Twitch', facebook: 'Facebook', reddit: 'Reddit', vimeo: 'Vimeo',
+};
+
+function normalizePrefs(prefs = {}) {
+  const p = prefs && typeof prefs === 'object' ? prefs : {};
+  const fragments = parseInt(p.concurrentFragments, 10);
+  const retries = p.retries === 'infinite' ? 'infinite' : parseInt(p.retries, 10);
+  return {
+    filenameTemplate: FILENAME_TEMPLATES[p.filenameTemplate] ? p.filenameTemplate : 'title_id',
+    organizeByPlatform: !!p.organizeByPlatform,
+    concurrentFragments: [1, 2, 4, 8, 16].includes(fragments) ? fragments : 4,
+    retries: retries === 'infinite' || [3, 10, 25].includes(retries) ? retries : 10,
+    sponsorBlock: !!p.sponsorBlock,
+    embedChapters: p.embedChapters !== false,
+    overwriteFiles: !!p.overwriteFiles,
+    preferredEncoder: ['auto', 'nvenc', 'qsv', 'amf', 'cpu'].includes(p.preferredEncoder) ? p.preferredEncoder : 'auto',
+  };
+}
+
 function formatYtDlpError(errText = '') {
   const e = (errText || '').toLowerCase();
   if ((e.includes('could not copy') && e.includes('cookie')) || (e.includes('permission denied') && e.includes('cookie')) || e.includes('lockprofilecookiedatabase')) {
@@ -253,7 +348,12 @@ class YouTubeAntiBlockManager {
     this.lastVerifiedTimestamp = 0;
   }
 
-  findWorkingBrowser() {
+  /**
+   * Probe installed browsers for a readable cookie store.
+   * Fully asynchronous: the previous spawnSync loop could freeze the Electron
+   * main process (and therefore the whole UI) for up to ~20 seconds.
+   */
+  async findWorkingBrowser() {
     if (this.cachedWorkingBrowser && (Date.now() - this.lastVerifiedTimestamp < 600000)) {
       return this.cachedWorkingBrowser;
     }
@@ -261,23 +361,23 @@ class YouTubeAntiBlockManager {
     const ytDlp = this.engineManager?.ytDlpPath;
     if (!ytDlp) return null;
 
+    const probe = (browser) => new Promise((resolve) => {
+      execFile(ytDlp, [
+        '--cookies-from-browser', browser,
+        '--skip-download',
+        '--no-warnings',
+        'https://www.youtube.com/robots.txt',
+      ], { windowsHide: true, encoding: 'utf8', timeout: 3500 }, (_err, stdout = '', stderr = '') => {
+        const errText = stderr.toLowerCase();
+        if (isCookieLockError(errText)) return resolve(false);
+        resolve(/robots\.txt|User-agent|Extracted/.test(stdout));
+      });
+    });
+
     for (const b of this.candidateBrowsers) {
       try {
-        const testRes = spawnSync(ytDlp, [
-          '--cookies-from-browser', b,
-          '--skip-download',
-          '--no-warnings',
-          'https://www.youtube.com/robots.txt'
-        ], { windowsHide: true, encoding: 'utf8', timeout: 3500 });
-
-        const stderr = (testRes.stderr || '').toLowerCase();
-        if (stderr.includes('could not copy') || stderr.includes('permission denied') || stderr.includes('lockprofilecookiedatabase')) {
-          continue; // Cookie database locked by running browser, skip!
-        }
-
-        if (testRes.stdout && (testRes.stdout.includes('robots.txt') || testRes.stdout.includes('User-agent') || testRes.stdout.includes('Extracted'))) {
-          this.cachedWorkingBrowser = b;
-          this.lastVerifiedTimestamp = Date.now();
+        if (await probe(b)) {
+          this.setWorkingBrowser(b);
           return b;
         }
       } catch (e) {}
@@ -285,11 +385,12 @@ class YouTubeAntiBlockManager {
     return null;
   }
 
-  getAntiBlockArgs(isFrequent, chosenBrowser = null) {
+  getAntiBlockArgs(isFrequent, chosenBrowser = null, retries = 10) {
+    const retryValue = String(retries);
     const antiBlockArgs = [
       '--socket-timeout', '30',
-      '--retries', '10',
-      '--fragment-retries', '10',
+      '--retries', retryValue,
+      '--fragment-retries', retryValue,
       '--retry-sleep', '429:5',
       '--js-runtimes', 'node',
     ];
@@ -301,15 +402,15 @@ class YouTubeAntiBlockManager {
 
     // Only inject cookies proactively if the user explicitly selected a specific browser.
     // When 'auto', clean downloads run without cookies to avoid DB locks; bot challenge auto-rescue kicks in dynamically if needed.
-    let effectiveBrowser = chosenBrowser;
-    if (effectiveBrowser && effectiveBrowser !== 'none' && effectiveBrowser !== 'auto') {
+    const effectiveBrowser = sanitizeBrowser(chosenBrowser);
+    if (effectiveBrowser) {
       antiBlockArgs.push('--cookies-from-browser', effectiveBrowser);
     }
 
     return {
       args: antiBlockArgs,
       isFrequent,
-      effectiveBrowser: (effectiveBrowser !== 'none' && effectiveBrowser !== 'auto') ? effectiveBrowser : null,
+      effectiveBrowser,
     };
   }
 }
@@ -318,12 +419,28 @@ class Downloader {
   constructor(engineManager) {
     this.engineManager = engineManager;
     this.activeJobs = new Map(); // jobId -> { proc, config, abortFn, outputDir }
+    this.canceledJobs = new Set();
     this.youtubeAntiBlock = new YouTubeAntiBlockManager(engineManager);
   }
 
   _isYoutubeUrl(url = '') {
     const u = (url || '').toLowerCase();
     return u.includes('youtube.com') || u.includes('youtu.be') || u.startsWith('ytsearch');
+  }
+
+  /**
+   * Pick the H.264 encoder honoring the user preference, falling back to the
+   * best detected hardware encoder and finally to libx264.
+   */
+  _pickH264Encoder(preferred = 'auto') {
+    const hw = this.engineManager.status?.hardwareAccels || {};
+    const map = { nvenc: 'h264_nvenc', qsv: 'h264_qsv', amf: 'h264_amf' };
+    if (preferred === 'cpu') return 'libx264';
+    if (map[preferred] && hw[preferred]) return map[preferred];
+    if (hw.nvenc) return 'h264_nvenc';
+    if (hw.qsv) return 'h264_qsv';
+    if (hw.amf) return 'h264_amf';
+    return 'libx264';
   }
 
   _isTikTokUrl(url = '') {
@@ -367,7 +484,7 @@ class Downloader {
   }
 
   async _ensureCompatibleH264Mp4(filePath, options = {}, onProgress, onLog) {
-    const { fastReencode, noAudio, jobId, format } = options;
+    const { fastReencode, noAudio, jobId, format, preferredEncoder } = options;
     if (!filePath || !fs.existsSync(filePath)) return filePath;
 
     const streams = await this._probeMediaStreams(filePath);
@@ -393,13 +510,7 @@ class Downloader {
       return filePath;
     }
 
-    const encoder = this.engineManager.status?.hardwareAccels?.nvenc
-      ? 'h264_nvenc'
-      : this.engineManager.status?.hardwareAccels?.qsv
-      ? 'h264_qsv'
-      : this.engineManager.status?.hardwareAccels?.amf
-      ? 'h264_amf'
-      : 'libx264';
+    const encoder = this._pickH264Encoder(preferredEncoder);
 
     if (onLog) {
       onLog(`[Fast Re-encode] Converting video track (${(streams.videoCodec || 'unknown').toUpperCase()}) to standard H.264 (${encoder}) and audio to AAC for 100% Adobe After Effects & Premiere compatibility...`);
@@ -553,22 +664,21 @@ class Downloader {
       args.push('--skip-download');
     }
 
-    const activeBrowser = options.cookiesBrowser;
+    const activeBrowser = sanitizeBrowser(options.cookiesBrowser);
 
     if (isYoutube) {
       this.youtubeAntiBlock.recordRequest();
       const isFrequent = this.youtubeAntiBlock.isFrequentUsage();
       const antiBlock = this.youtubeAntiBlock.getAntiBlockArgs(isFrequent, activeBrowser);
       args.push(...antiBlock.args);
-    } else {
-      if (activeBrowser && activeBrowser !== 'none' && activeBrowser !== 'auto') {
-        args.push('--cookies-from-browser', activeBrowser);
-      }
+    } else if (activeBrowser) {
+      args.push('--cookies-from-browser', activeBrowser);
     }
 
-    // Network Proxy Support
-    if (options.proxy && typeof options.proxy === 'string' && options.proxy.trim()) {
-      args.push('--proxy', options.proxy.trim());
+    // Network Proxy Support (only well-formed proxy URLs are forwarded)
+    const inspectProxy = sanitizeProxy(options.proxy);
+    if (inspectProxy) {
+      args.push('--proxy', inspectProxy);
     }
 
     args.push(cleanUrl);
@@ -585,9 +695,7 @@ class Downloader {
         if (code !== 0) {
           const errDetail = stderr.trim() || 'Could not fetch metadata for this URL.';
           const lowerErr = errDetail.toLowerCase();
-          const isCookieLock = (lowerErr.includes('could not copy') && lowerErr.includes('cookie')) ||
-                               (lowerErr.includes('permission denied') && lowerErr.includes('cookie')) ||
-                               lowerErr.includes('lockprofilecookiedatabase');
+          const isCookieLock = isCookieLockError(lowerErr);
 
           if (isCookieLock && !isRetry) {
             this.youtubeAntiBlock.invalidateWorkingBrowser();
@@ -698,7 +806,7 @@ class Downloader {
                 availableResolutions.push({
                   height: f.height,
                   fps: f.fps || 30,
-                  label: f.height >= 2160 ? '4K UHD (2160p)' : f.height >= 1440 ? '2K QHD (1440p)' : f.height >= 1080 ? 'Full HD (1080p)' : `${f.height}p`,
+                  label: f.height >= 2160 ? `4K · ${f.height}p` : f.height >= 1440 ? `2K · ${f.height}p` : `${f.height}p`,
                 });
               }
             }
@@ -1025,7 +1133,7 @@ class Downloader {
                   platform: 'tiktok',
                   isLive: false,
                   isAudioOnly: false,
-                  resolutions: [{ height: 1080, fps: 30, label: 'Clean HD (No Watermark)' }],
+                  resolutions: [{ height: 1080, fps: 30, label: 'HD · No watermark' }],
                   tiktokDirectVideo: d.play,
                   tiktokDirectAudio: d.music,
                 });
@@ -1130,32 +1238,45 @@ class Downloader {
       throw new Error('This domain is blocked by security policy.');
     }
 
-    const resolvedOutputDir = (outputDir && typeof outputDir === 'string' && outputDir.trim())
-      ? outputDir
+    const prefs = normalizePrefs(jobConfig.prefs);
+    jobConfig = { ...jobConfig, prefs };
+
+    const baseOutputDir = (outputDir && typeof outputDir === 'string' && outputDir.trim() && path.isAbsolute(outputDir.trim()))
+      ? path.resolve(outputDir.trim())
       : path.join(os.homedir(), 'Downloads', 'itzDownloader');
 
-    if (!fs.existsSync(resolvedOutputDir)) {
-      fs.mkdirSync(resolvedOutputDir, { recursive: true });
-    }
+    const platformFolder = prefs.organizeByPlatform
+      ? PLATFORM_FOLDER_NAMES[jobConfig.platform] || PLATFORM_FOLDER_NAMES[this._detectPlatform(url)] || null
+      : null;
+    const resolvedOutputDir = platformFolder ? path.join(baseOutputDir, platformFolder) : baseOutputDir;
 
-    // Safely destructure custom options with defaults to prevent ReferenceError
+    await fs.promises.mkdir(resolvedOutputDir, { recursive: true });
+
+    // Safely destructure custom options with defaults, then clamp every value
+    // that ends up in yt-dlp/FFmpeg arguments to a known-good allowlist.
     const {
-      mediaType = 'video',
-      format = 'mp4',
+      mediaType: rawMediaType = 'video',
+      format: rawFormat = 'mp4',
       resolution = 'best',
       customResolution = '',
       fastReencode = false,
       noAudio = false,
-      audioFormat = 'mp3',
+      audioFormat: rawAudioFormat = 'mp3',
       audioBitrate = '320k',
       embedThumbnail = true,
       downloadSubtitles = false,
-      subLangs = 'all',
+      subLangs: rawSubLangs = 'all',
       embedSubtitles = false,
-      rateLimit = null,
+      rateLimit: rawRateLimit = null,
       cookiesBrowser = null,
       extraArgs = '',
     } = customOptions || {};
+
+    const mediaType = rawMediaType === 'audio' ? 'audio' : 'video';
+    const format = ['mp4', 'mkv', 'webm'].includes(rawFormat) ? rawFormat : 'mp4';
+    const audioFormat = ['mp3', 'flac', 'wav', 'm4a', 'opus', 'vorbis'].includes(rawAudioFormat) ? rawAudioFormat : 'mp3';
+    const subLangs = /^[a-z]{2,3}(-[A-Za-z]{2,4})?(,[a-z]{2,3}(-[A-Za-z]{2,4})?)*$|^all$/.test(rawSubLangs || '') ? rawSubLangs : 'all';
+    const rateLimit = sanitizeRateLimit(rawRateLimit);
 
     const isTikTok = this._isTikTokUrl(url);
 
@@ -1241,32 +1362,40 @@ class Downloader {
 
     // Speed & Stream Stability Optimization: download 4 fragments concurrently and buffer chunks to stabilize speed
     args.push(
-      '--concurrent-fragments', '4',
+      '--concurrent-fragments', String(prefs.concurrentFragments),
       '--buffer-size', '64K',
       '--http-chunk-size', '10M'
     );
 
+    args.push(prefs.overwriteFiles ? '--force-overwrites' : '--no-overwrites');
+
     // YouTube / Search Anti-Block & Node.js Engine Optimization
     // Spotify resolves to YouTube audio search (ytsearch1:...) which runs anonymously and must NEVER pass browser cookies.
     const isYoutube = this._isYoutubeUrl(downloadUrl) || this._isYoutubeUrl(url);
-    const chosenBrowser = isSpotify ? 'none' : (customOptions.cookiesBrowser || jobConfig.cookiesBrowser);
+    const cookiesDisabled = isSpotify || cookiesBrowser === 'none';
+    const chosenBrowser = cookiesDisabled ? 'none' : (cookiesBrowser || jobConfig.cookiesBrowser);
 
     if (isYoutube) {
       this.youtubeAntiBlock.recordRequest();
       const isFrequent = this.youtubeAntiBlock.isFrequentUsage();
-      const antiBlock = this.youtubeAntiBlock.getAntiBlockArgs(isFrequent, chosenBrowser);
+      const antiBlock = this.youtubeAntiBlock.getAntiBlockArgs(isFrequent, chosenBrowser, prefs.retries);
       args.push(...antiBlock.args);
+      if (prefs.sponsorBlock) {
+        args.push('--sponsorblock-remove', 'sponsor,selfpromo,interaction');
+      }
       if (onLog && antiBlock.effectiveBrowser) {
         onLog(`[YouTube Shield] Active authenticated session via ${antiBlock.effectiveBrowser} cookies`);
       }
     } else {
-      if (!isSpotify && chosenBrowser && chosenBrowser !== 'none' && chosenBrowser !== 'auto') {
-        args.push('--cookies-from-browser', chosenBrowser);
+      args.push('--retries', String(prefs.retries), '--fragment-retries', String(prefs.retries));
+      const safeBrowser = sanitizeBrowser(chosenBrowser);
+      if (!isSpotify && safeBrowser) {
+        args.push('--cookies-from-browser', safeBrowser);
       }
     }
 
     // Network Proxy Support
-    const effectiveProxy = (jobConfig.proxy || customOptions.proxy || '').trim();
+    const effectiveProxy = sanitizeProxy(jobConfig.proxy || customOptions?.proxy);
     if (effectiveProxy) {
       args.push('--proxy', effectiveProxy);
       if (onLog) {
@@ -1282,12 +1411,16 @@ class Downloader {
     }
 
     // Output naming template
-    const templateName = isSpotify
-      ? path.join(resolvedOutputDir, '%(title)s.%(ext)s')
-      : path.join(resolvedOutputDir, '%(title)s [%(id)s].%(ext)s');
-    args.push('-o', templateName);
+    const templateKey = isSpotify && prefs.filenameTemplate === 'title_id' ? 'title' : prefs.filenameTemplate;
+    args.push('-o', path.join(resolvedOutputDir, FILENAME_TEMPLATES[templateKey]));
+    args.push('--windows-filenames');
 
     // Apply Presets
+    const isAudioJob = ['mp3_320', 'flac', 'wav', 'aac'].includes(preset) || (preset === 'custom' && mediaType === 'audio');
+    if (prefs.embedChapters && !isAudioJob) {
+      args.push('--embed-chapters');
+    }
+
     if (preset === 'best_video') {
       args.push('-f', 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b');
       args.push('-S', 'vcodec:h264,res,acodec:m4a');
@@ -1362,33 +1495,26 @@ class Downloader {
         }
       }
 
-      if (rateLimit && rateLimit !== 'unlimited') {
-        args.push('--limit-rate', rateLimit);
+      const safeCustomBrowser = sanitizeBrowser(cookiesBrowser);
+      if (!isSpotify && safeCustomBrowser && !args.includes('--cookies-from-browser')) {
+        args.push('--cookies-from-browser', safeCustomBrowser);
       }
 
-      if (!isSpotify && cookiesBrowser && cookiesBrowser !== 'none' && cookiesBrowser !== 'auto') {
-        if (!args.includes('--cookies-from-browser')) {
-          args.push('--cookies-from-browser', cookiesBrowser);
-        }
-      }
-
-      if (extraArgs && typeof extraArgs === 'string') {
-        const extraList = extraArgs.trim().split(/\s+/).filter(Boolean);
-        for (const ea of extraList) {
-          if (!ea.startsWith('--exec') && !ea.startsWith('--config-location')) {
-            args.push(ea);
-          }
-        }
+      const extraList = parseExtraArgs(extraArgs);
+      if (extraList.length > 0) {
+        args.push(...extraList);
+        if (onLog) onLog(`[yt-dlp] Custom flags applied: ${extraList.join(' ')}`);
       }
     }
 
-    if (jobConfig.globalRateLimit && jobConfig.globalRateLimit !== 'unlimited') {
-      args.push('--limit-rate', jobConfig.globalRateLimit);
+    // A per-job limit (Advanced) wins over the global default
+    const effectiveRateLimit = rateLimit || sanitizeRateLimit(jobConfig.globalRateLimit);
+    if (effectiveRateLimit) {
+      args.push('--limit-rate', effectiveRateLimit);
     }
-    if (!isSpotify && jobConfig.cookiesBrowser && jobConfig.cookiesBrowser !== 'none' && jobConfig.cookiesBrowser !== 'auto') {
-      if (!args.includes('--cookies-from-browser')) {
-        args.push('--cookies-from-browser', jobConfig.cookiesBrowser);
-      }
+    const safeGlobalBrowser = sanitizeBrowser(jobConfig.cookiesBrowser);
+    if (!cookiesDisabled && safeGlobalBrowser && !args.includes('--cookies-from-browser')) {
+      args.push('--cookies-from-browser', safeGlobalBrowser);
     }
 
     args.push(downloadUrl);
@@ -1496,7 +1622,15 @@ class Downloader {
 
       proc.on('close', async (code) => {
         if (convertingInterval) clearInterval(convertingInterval);
+        const wasCanceled = this.canceledJobs.has(jobId);
         this.activeJobs.delete(jobId);
+
+        if (wasCanceled) {
+          this.canceledJobs.delete(jobId);
+          const cancelErr = new Error('Download canceled.');
+          cancelErr.canceled = true;
+          return reject(cancelErr);
+        }
 
         if (code === 0) {
           if (!finalFilePath || !fs.existsSync(finalFilePath)) {
@@ -1518,6 +1652,7 @@ class Downloader {
                 jobId,
                 format,
                 resolvedOutputDir,
+                preferredEncoder: prefs.preferredEncoder,
               }, onProgress, onLog);
             } catch (reencodeErr) {
               if (onLog) onLog(`[Re-encode Warning] Post-processing check failed: ${reencodeErr.message}`);
@@ -1536,9 +1671,7 @@ class Downloader {
           });
         } else {
           const lowerErr = accumulatedStderr.toLowerCase();
-          const isCookieLock = (lowerErr.includes('could not copy') && lowerErr.includes('cookie')) ||
-                               (lowerErr.includes('permission denied') && lowerErr.includes('cookie')) ||
-                               lowerErr.includes('lockprofilecookiedatabase');
+          const isCookieLock = isCookieLockError(lowerErr);
 
           if (isCookieLock && !jobConfig._cookieLockRetried) {
             this.youtubeAntiBlock.invalidateWorkingBrowser();
@@ -1559,7 +1692,7 @@ class Downloader {
 
           const isBotChallenge = isYoutube && (lowerErr.includes('sign in to confirm') || lowerErr.includes('not a bot') || lowerErr.includes('bot'));
           if (isBotChallenge && !jobConfig._botRetried) {
-            const workingBrowser = this.youtubeAntiBlock.findWorkingBrowser();
+            const workingBrowser = await this.youtubeAntiBlock.findWorkingBrowser();
             if (workingBrowser) {
               if (onLog) {
                 onLog(`[YouTube Shield] Bot challenge detected. Automatically rescuing download using ${workingBrowser} session...`);
@@ -1632,7 +1765,7 @@ class Downloader {
     } else if (fastReencode && this.engineManager.ffmpegPath) {
       if (onLog) onLog('[TikTok Engine] Fast re-encoding video with FFmpeg...');
       let reencodePercent = 15;
-      const encoder = this.engineManager.status?.hardwareAccels?.nvenc ? 'h264_nvenc' : this.engineManager.status?.hardwareAccels?.qsv ? 'h264_qsv' : 'libx264';
+      const encoder = this._pickH264Encoder(jobConfig.prefs?.preferredEncoder);
       if (onProgress) onProgress({ jobId, status: 'converting', percent: reencodePercent, speed: encoder, stage: `Re-encoding video with ${encoder}...` });
 
       const reencodePath = path.join(outputDir, `${safeTitle}_reencoded.mp4`);
@@ -1641,7 +1774,7 @@ class Downloader {
         '-y', '-i', tempPath,
         '-c:v', encoder,
         '-pix_fmt', 'yuv420p',
-        '-preset', 'fast',
+        ...(encoder === 'libx264' ? ['-preset', 'veryfast', '-crf', '20'] : encoder === 'h264_nvenc' ? ['-preset', 'p4', '-cq', '20'] : []),
         '-progress', 'pipe:1',
       ];
       if (customResolution) {
@@ -1792,8 +1925,11 @@ class Downloader {
   /**
    * Streaming HTTP downloader with realtime speed, ETA, and progress percent
    */
-  _downloadHttpMedia(downloadUrl, destPath, jobId, onProgress, onLog) {
+  _downloadHttpMedia(downloadUrl, destPath, jobId, onProgress, onLog, redirectsLeft = 5) {
     return new Promise((resolve, reject) => {
+      if (!/^https?:\/\//i.test(downloadUrl || '')) {
+        return reject(new Error('Invalid media stream URL.'));
+      }
       let abortController = new AbortController();
       let fileStream = fs.createWriteStream(destPath);
       let startTime = Date.now();
@@ -1821,7 +1957,13 @@ class Downloader {
       const req = protocol.get(downloadUrl, options, (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           fileStream.close();
-          return resolve(this._downloadHttpMedia(res.headers.location, destPath, jobId, onProgress, onLog));
+          res.resume();
+          if (redirectsLeft <= 0) {
+            this.activeJobs.delete(jobId);
+            return reject(new Error('Too many redirects while downloading media stream.'));
+          }
+          const nextUrl = new URL(res.headers.location, downloadUrl).toString();
+          return resolve(this._downloadHttpMedia(nextUrl, destPath, jobId, onProgress, onLog, redirectsLeft - 1));
         }
 
         if (res.statusCode !== 200) {
@@ -1880,6 +2022,10 @@ class Downloader {
       req.on('error', (err) => {
         try { fs.unlinkSync(destPath); } catch (e) {}
         this.activeJobs.delete(jobId);
+        if (this.canceledJobs.delete(jobId)) {
+          err = new Error('Download canceled.');
+          err.canceled = true;
+        }
         reject(err);
       });
     });
@@ -1892,6 +2038,8 @@ class Downloader {
     const job = this.activeJobs.get(jobId);
     if (!job) return false;
 
+    this.canceledJobs.add(jobId);
+
     // Direct HTTP download abort
     if (job.abortFn) {
       try { job.abortFn(); } catch (e) {}
@@ -1899,28 +2047,31 @@ class Downloader {
       return true;
     }
 
-    // Process kill
-    if (job.proc) {
-      try {
-        if (process.platform === 'win32' && job.proc.pid) {
-          execSync(`taskkill /F /T /PID ${job.proc.pid}`, { stdio: 'ignore', windowsHide: true });
-        } else {
-          job.proc.kill('SIGKILL');
-        }
-      } catch (e) {}
-    }
-
-    // Clean up partial .part or .ytdl files in outputDir
-    try {
-      if (job.outputDir && fs.existsSync(job.outputDir)) {
-        const files = fs.readdirSync(job.outputDir);
+    const cleanupPartials = () => {
+      if (!job.outputDir) return;
+      fs.promises.readdir(job.outputDir).then((files) => {
         for (const file of files) {
           if (file.endsWith('.part') || file.endsWith('.ytdl') || file.includes('_temp_')) {
-            try { fs.unlinkSync(path.join(job.outputDir, file)); } catch (e) {}
+            fs.promises.unlink(path.join(job.outputDir, file)).catch(() => {});
           }
         }
+      }).catch(() => {});
+    };
+
+    // Process tree kill (yt-dlp spawns ffmpeg children), non-blocking
+    if (job.proc && job.proc.pid) {
+      if (process.platform === 'win32') {
+        execFile('taskkill', ['/F', '/T', '/PID', String(job.proc.pid)], { windowsHide: true }, () => {
+          // Give Windows a moment to release file handles before deleting partials
+          setTimeout(cleanupPartials, 400);
+        });
+      } else {
+        try { job.proc.kill('SIGKILL'); } catch (e) {}
+        cleanupPartials();
       }
-    } catch (e) {}
+    } else {
+      cleanupPartials();
+    }
 
     this.activeJobs.delete(jobId);
     return true;

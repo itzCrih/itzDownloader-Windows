@@ -1,11 +1,16 @@
 param(
   [string]$ReleaseDir = "release",
   [string]$CertPath = "certs\itzcrih-codesign.pfx",
-  [string]$Password = "itzCrih2026Secure!"
+  [string]$Password = $env:CSC_KEY_PASSWORD
 )
 
 if (!(Test-Path $CertPath)) {
   Write-Warning "Certificate not found at $CertPath"
+  exit 0
+}
+
+if ([string]::IsNullOrEmpty($Password)) {
+  Write-Warning "Set the CSC_KEY_PASSWORD environment variable to sign binaries."
   exit 0
 }
 

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, Notification, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -70,24 +70,21 @@ function createWindow(onReady = null) {
       nodeIntegration: false,
       contextIsolation: true,
       webSecurity: true,
-      sandbox: false,
+      sandbox: true,
+      spellcheck: false,
     },
   });
 
-  // Intercept links to external browser
+  // Intercept links to external browser (only http/https ever leave the app)
   mainWindow.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
-    if (targetUrl.startsWith('https:') || targetUrl.startsWith('http:')) {
-      shell.openExternal(targetUrl);
-    }
+    if (isSafeExternalUrl(targetUrl)) shell.openExternal(targetUrl);
     return { action: 'deny' };
   });
 
   mainWindow.webContents.on('will-navigate', (event, targetUrl) => {
     if (targetUrl !== mainWindow.webContents.getURL()) {
       event.preventDefault();
-      if (targetUrl.startsWith('https:') || targetUrl.startsWith('http:')) {
-        shell.openExternal(targetUrl);
-      }
+      if (isSafeExternalUrl(targetUrl)) shell.openExternal(targetUrl);
     }
   });
 
@@ -129,6 +126,91 @@ function createWindow(onReady = null) {
   }
 }
 
+function isSafeExternalUrl(rawUrl) {
+  try {
+    const u = new URL(rawUrl);
+    return u.protocol === 'https:' || u.protocol === 'http:';
+  } catch (e) {
+    return false;
+  }
+}
+
+function isSafeLocalPath(p) {
+  return typeof p === 'string' && p.length > 0 && p.length < 1024 && path.isAbsolute(p) && !p.includes('\u0000');
+}
+
+/**
+ * Strict Content-Security-Policy for the packaged app. Dev mode is skipped
+ * because Vite's React refresh preamble relies on inline scripts.
+ */
+function applyContentSecurityPolicy() {
+  if (!app.isPackaged) return;
+  const csp = [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' data: https://fonts.gstatic.com",
+    "img-src 'self' data: blob: https: http:",
+    "connect-src 'self'",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "frame-src 'none'",
+  ].join('; ');
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({ responseHeaders: { ...details.responseHeaders, 'Content-Security-Policy': [csp] } });
+  });
+}
+
+function sendToRenderer(channel, data) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, data);
+  }
+}
+
+/**
+ * yt-dlp prints dozens of lines per second per job. Forwarding every line as
+ * its own IPC message (and React state update) made the UI stutter with
+ * several parallel downloads. Logs are batched and progress is throttled,
+ * while status transitions are always delivered immediately.
+ */
+const LOG_FLUSH_MS = 150;
+const PROGRESS_THROTTLE_MS = 120;
+const pendingLogs = new Map(); // jobId -> string[]
+const lastProgress = new Map(); // jobId -> { time, status }
+let logFlushTimer = null;
+
+function flushLogs() {
+  logFlushTimer = null;
+  if (pendingLogs.size === 0) return;
+  const batch = [];
+  for (const [jobId, lines] of pendingLogs) batch.push({ jobId, lines });
+  pendingLogs.clear();
+  sendToRenderer('job:log-batch', batch);
+}
+
+function queueLog(jobId, text) {
+  if (!text) return;
+  const lines = pendingLogs.get(jobId) || [];
+  lines.push(String(text).slice(0, 2000));
+  if (lines.length > 300) lines.shift();
+  pendingLogs.set(jobId, lines);
+  if (!logFlushTimer) logFlushTimer = setTimeout(flushLogs, LOG_FLUSH_MS);
+}
+
+function queueProgress(progress) {
+  const now = Date.now();
+  const prev = lastProgress.get(progress.jobId);
+  const statusChanged = !prev || prev.status !== progress.status;
+  if (!statusChanged && now - prev.time < PROGRESS_THROTTLE_MS) return;
+  lastProgress.set(progress.jobId, { time: now, status: progress.status });
+  sendToRenderer('job:progress', progress);
+}
+
+function finishJobChannel(jobId) {
+  flushLogs();
+  lastProgress.delete(jobId);
+}
+
 // Global Anti-Crash Exception & Rejection Handlers
 process.on('uncaughtException', (err) => {
   console.error('[itzDownloader Core] Uncaught Exception:', err);
@@ -151,6 +233,8 @@ if (!gotTheLock) {
 
   app.whenReady().then(async () => {
     const splashStartTime = Date.now();
+    applyContentSecurityPolicy();
+    if (process.platform === 'win32') app.setAppUserModelId('it.itzcrih.itzdownloader.desktop');
     // Show instant splash screen immediately
     createSplashWindow();
 
@@ -233,99 +317,148 @@ function setupIpcHandlers() {
     return null;
   });
 
+  // Opening files: only real absolute paths. Executables/scripts are revealed
+  // in Explorer instead of being launched.
+  const BLOCKED_OPEN_EXT = new Set(['.exe', '.bat', '.cmd', '.com', '.ps1', '.vbs', '.js', '.msi', '.scr', '.lnk', '.hta', '.jar']);
+
   ipcMain.handle('shell:showInFolder', async (event, filePath) => {
-    if (!filePath || !fs.existsSync(filePath)) return false;
+    if (!isSafeLocalPath(filePath) || !fs.existsSync(filePath)) return false;
     shell.showItemInFolder(filePath);
     return true;
   });
 
   ipcMain.handle('shell:openFile', async (event, filePath) => {
-    if (!filePath || !fs.existsSync(filePath)) return false;
-    await shell.openPath(filePath);
-    return true;
+    if (!isSafeLocalPath(filePath) || !fs.existsSync(filePath)) return false;
+    if (BLOCKED_OPEN_EXT.has(path.extname(filePath).toLowerCase())) {
+      shell.showItemInFolder(filePath);
+      return true;
+    }
+    const err = await shell.openPath(filePath);
+    return !err;
   });
 
   ipcMain.handle('shell:openExternal', async (event, externalUrl) => {
-    if (!externalUrl) return false;
+    if (!isSafeExternalUrl(externalUrl)) return false;
     await shell.openExternal(externalUrl);
     return true;
   });
 
-  ipcMain.handle('app:getDefaultOutputDir', () => {
+  ipcMain.handle('clipboard:read', () => {
+    try {
+      return clipboard.readText().slice(0, 4096);
+    } catch (e) {
+      return '';
+    }
+  });
+
+  ipcMain.handle('clipboard:write', (event, text) => {
+    try {
+      clipboard.writeText(String(text ?? ''));
+      return true;
+    } catch (e) {
+      return false;
+    }
+  });
+
+  ipcMain.handle('app:getVersion', () => app.getVersion());
+
+  ipcMain.handle('app:notify', (event, payload = {}) => {
+    try {
+      if (!Notification.isSupported()) return false;
+      const iconPath = path.join(__dirname, '../public/logo.png');
+      const notification = new Notification({
+        title: String(payload.title || 'itzDownloader').slice(0, 120),
+        body: String(payload.body || '').slice(0, 300),
+        icon: fs.existsSync(iconPath) ? iconPath : undefined,
+        silent: true,
+      });
+      notification.on('click', () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          if (mainWindow.isMinimized()) mainWindow.restore();
+          mainWindow.show();
+          mainWindow.focus();
+        }
+        if (isSafeLocalPath(payload.filePath) && fs.existsSync(payload.filePath)) {
+          shell.showItemInFolder(payload.filePath);
+        }
+      });
+      notification.show();
+      return true;
+    } catch (e) {
+      return false;
+    }
+  });
+
+  ipcMain.handle('app:getDefaultOutputDir', async () => {
     // Default to user's standard Downloads folder
     const downloads = app.getPath('downloads');
     const itzDownloaderDir = path.join(downloads, 'itzDownloader');
-    if (!fs.existsSync(itzDownloaderDir)) {
-      try {
-        fs.mkdirSync(itzDownloaderDir, { recursive: true });
-      } catch (e) {
-        return downloads;
-      }
+    try {
+      await fs.promises.mkdir(itzDownloaderDir, { recursive: true });
+      return itzDownloaderDir;
+    } catch (e) {
+      return downloads;
     }
-    return itzDownloaderDir;
   });
 
   // Engine Manager IPC
+  const engineProgress = (engine) => (progress) => sendToRenderer('engine:download-progress', { engine, ...progress });
+
   ipcMain.handle('engine:getStatus', async (event, force) => {
-    return await engineManager.detect(force || false);
+    return await engineManager.detect(!!force);
   });
 
   ipcMain.handle('engine:downloadYtDlp', async () => {
-    return await engineManager.downloadYtDlp((progress) => {
-      if (mainWindow) mainWindow.webContents.send('engine:download-progress', { engine: 'yt-dlp', ...progress });
-    });
+    return await engineManager.downloadYtDlp(engineProgress('yt-dlp'));
   });
 
   ipcMain.handle('engine:updateYtDlp', async () => {
-    return await engineManager.updateYtDlp((progress) => {
-      if (mainWindow) mainWindow.webContents.send('engine:download-progress', { engine: 'yt-dlp', ...progress });
-    });
+    return await engineManager.updateYtDlp(engineProgress('yt-dlp'));
   });
 
   ipcMain.handle('engine:downloadFfmpeg', async () => {
-    return await engineManager.downloadFfmpeg((progress) => {
-      if (mainWindow) mainWindow.webContents.send('engine:download-progress', { engine: 'ffmpeg', ...progress });
-    });
+    return await engineManager.downloadFfmpeg(engineProgress('ffmpeg'));
   });
 
   ipcMain.handle('engine:ensureAll', async () => {
-    return await engineManager.ensureAllEngines((progress) => {
-      if (mainWindow) {
-        mainWindow.webContents.send('engine:install-progress', progress);
-      }
-    });
+    return await engineManager.ensureAllEngines((progress) => sendToRenderer('engine:install-progress', progress));
   });
 
   // Media Inspection
-  ipcMain.handle('media:inspectUrl', async (event, { url, options }) => {
-    return await downloader.inspectUrl(url, options);
+  ipcMain.handle('media:inspectUrl', async (event, { url, options } = {}) => {
+    return await downloader.inspectUrl(url, options || {});
   });
 
   // Job Execution & Downloads
   ipcMain.handle('job:start', async (event, jobConfig) => {
+    if (!jobConfig || typeof jobConfig !== 'object' || typeof jobConfig.jobId !== 'string') {
+      throw new Error('Invalid job configuration.');
+    }
     const { jobId } = jobConfig;
     try {
       const result = await downloader.startDownload(
         jobConfig,
-        (progress) => {
-          if (mainWindow) mainWindow.webContents.send('job:progress', progress);
-        },
-        (logLine) => {
-          if (mainWindow) mainWindow.webContents.send('job:log', { jobId, text: logLine });
-        }
+        queueProgress,
+        (logLine) => queueLog(jobId, logLine)
       );
-      if (mainWindow) mainWindow.webContents.send('job:complete', result);
+      finishJobChannel(jobId);
+      sendToRenderer('job:complete', result);
       return result;
     } catch (err) {
-      if (mainWindow) mainWindow.webContents.send('job:error', { jobId, error: err.message });
-      throw err;
+      finishJobChannel(jobId);
+      // A user-initiated cancel is not an error: job:canceled was already sent
+      if (!err?.canceled) {
+        sendToRenderer('job:error', { jobId, error: err.message });
+      }
+      return { jobId, error: err.message, canceled: !!err?.canceled };
     }
   });
 
   ipcMain.handle('job:cancel', (event, jobId) => {
     const canceled = downloader.cancelDownload(jobId);
-    if (canceled && mainWindow) {
-      mainWindow.webContents.send('job:canceled', { jobId });
+    if (canceled) {
+      finishJobChannel(jobId);
+      sendToRenderer('job:canceled', { jobId });
     }
     return canceled;
   });

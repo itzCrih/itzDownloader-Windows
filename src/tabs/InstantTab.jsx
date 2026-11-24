@@ -18,10 +18,10 @@ import {
   ListMusic,
   Disc,
   ChevronDown,
-  ChevronUp
 } from 'lucide-react';
 import { detectPlatform, validateMediaUrl } from '../utils/platformDetect';
 import { formatDuration, getItemUnit, isVideoJobOrPreset } from '../utils/formatters';
+import { Collapsible } from '../components/ui/Collapsible';
 
 export default function InstantTab({
   onAddJob,
@@ -46,15 +46,14 @@ export default function InstantTab({
 
   const platform = detectPlatform(url);
 
-  const handlePasteFromClipboard = () => {
-    if (window.itzDownloaderAPI?.readClipboard) {
-      const text = window.itzDownloaderAPI.readClipboard().trim();
-      if (text.startsWith('http://') || text.startsWith('https://')) {
-        setUrl(text);
-        inspectTargetUrl(text);
-      } else {
-        onShowToast('No valid link found in clipboard.', 'warning');
-      }
+  const handlePasteFromClipboard = async () => {
+    if (!window.itzDownloaderAPI?.readClipboard) return;
+    const text = ((await window.itzDownloaderAPI.readClipboard()) || '').trim();
+    if (text.startsWith('http://') || text.startsWith('https://')) {
+      setUrl(text);
+      inspectTargetUrl(text);
+    } else {
+      onShowToast('No valid link found in clipboard.', 'warning');
     }
   };
 
@@ -267,7 +266,8 @@ export default function InstantTab({
           <input
             type="text"
             className="paste-input"
-            placeholder="Paste video or audio link (YouTube, TikTok, Spotify, Instagram, Twitter)..."
+            placeholder="Paste a video or audio link…"
+            spellCheck={false}
             value={url}
             onChange={(e) => handleUrlChange(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -377,11 +377,11 @@ export default function InstantTab({
             ) : (
               <div className="media-thumb-placeholder">
                 {mediaInfo.isPlaylist ? (
-                  <ListMusic size={32} color="#e6b422" />
+                  <ListMusic size={32} className="icon-accent" />
                 ) : mediaInfo.isAudioOnly ? (
-                  <Music size={32} color="#e6b422" />
+                  <Music size={32} className="icon-accent" />
                 ) : (
-                  <Film size={32} color="#e6b422" />
+                  <Film size={32} className="icon-accent" />
                 )}
               </div>
             )}
@@ -440,7 +440,7 @@ export default function InstantTab({
               onClick={() => setPlaylistMode('playlist')}
             >
               <ListMusic size={14} />
-              <span>Download Entire Playlist ({mediaInfo.itemCount} items)</span>
+              <span>Entire playlist · {mediaInfo.itemCount} items</span>
             </button>
             <button
               type="button"
@@ -448,7 +448,7 @@ export default function InstantTab({
               onClick={() => setPlaylistMode('single')}
             >
               <Film size={14} />
-              <span>Download This Video Only</span>
+              <span>This video only</span>
             </button>
           </div>
         </div>
@@ -459,17 +459,19 @@ export default function InstantTab({
         <div className="playlist-preview-card page-view-animated">
           <button
             type="button"
-            className="playlist-preview-toggle-btn"
+            className={`playlist-preview-toggle-btn ${showTracklistPreview ? 'is-open' : ''}`}
+            aria-expanded={showTracklistPreview}
             onClick={() => setShowTracklistPreview(!showTracklistPreview)}
           >
             <div className="playlist-toggle-title">
-              <ListMusic size={15} color="#e6b422" />
-              <span>{getItemUnit(selectedPreset, null, { capitalize: true, platform, mediaInfo })} in this Playlist ({mediaInfo.entries.length})</span>
+              <ListMusic size={15} className="icon-accent" />
+              <span>{getItemUnit(selectedPreset, null, { capitalize: true, platform, mediaInfo })} in this playlist</span>
+              <span className="count-pill">{mediaInfo.entries.length}</span>
             </div>
-            {showTracklistPreview ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+            <ChevronDown size={15} className="ui-collapsible-chevron-icon" />
           </button>
 
-          {showTracklistPreview && (
+          <Collapsible open={showTracklistPreview}>
             <div className="playlist-preview-list">
               {mediaInfo.entries.map((entry, idx) => (
                 <div key={entry.id || idx} className="playlist-preview-item">
@@ -484,7 +486,7 @@ export default function InstantTab({
                 </div>
               ))}
             </div>
-          )}
+          </Collapsible>
         </div>
       )}
 
@@ -498,14 +500,18 @@ export default function InstantTab({
             <span className="section-hint">Optimized 1-click presets for {platform.name}</span>
           </div>
 
-          <div className="preset-cards-grid">
+          <div className="preset-cards-grid" role="radiogroup" aria-label="Download preset">
             {/* Context-aware presets: AUDIO ONLY (Spotify, SoundCloud, etc.) */}
             {isAudioOnlyMedia ? (
               <>
                 {/* Audio 1: MP3 320k */}
                 <div
+                  role="radio"
+                  tabIndex={0}
+                  aria-checked={selectedPreset === 'mp3_320'}
                   className={`preset-card ${selectedPreset === 'mp3_320' ? 'selected' : ''}`}
                   onClick={() => setSelectedPreset('mp3_320')}
+                  onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), setSelectedPreset('mp3_320'))}
                 >
                   <div className="preset-card-top">
                     <div className="preset-icon-box gold">
@@ -513,7 +519,7 @@ export default function InstantTab({
                     </div>
                     <span className="preset-badge gold">Recommended</span>
                   </div>
-                  <div className="preset-title">MP3 Audio (320 kbps)</div>
+                  <div className="preset-title">MP3 Audio</div>
                   <div className="preset-desc">Highest MP3 quality with embedded artist, track metadata and HD cover art.</div>
                   <div className="preset-specs">
                     <span>320 kbps</span>
@@ -526,8 +532,12 @@ export default function InstantTab({
 
                 {/* Audio 2: Studio FLAC */}
                 <div
+                  role="radio"
+                  tabIndex={0}
+                  aria-checked={selectedPreset === 'flac'}
                   className={`preset-card ${selectedPreset === 'flac' ? 'selected' : ''}`}
                   onClick={() => setSelectedPreset('flac')}
+                  onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), setSelectedPreset('flac'))}
                 >
                   <div className="preset-card-top">
                     <div className="preset-icon-box green">
@@ -535,7 +545,7 @@ export default function InstantTab({
                     </div>
                     <span className="preset-badge green">Audiophile</span>
                   </div>
-                  <div className="preset-title">Studio FLAC (Lossless)</div>
+                  <div className="preset-title">Studio FLAC</div>
                   <div className="preset-desc">Bit-perfect audio reproduction without loss or compression artifacts.</div>
                   <div className="preset-specs">
                     <span>Lossless</span>
@@ -548,8 +558,12 @@ export default function InstantTab({
 
                 {/* Audio 3: WAV Master */}
                 <div
+                  role="radio"
+                  tabIndex={0}
+                  aria-checked={selectedPreset === 'wav'}
                   className={`preset-card ${selectedPreset === 'wav' ? 'selected' : ''}`}
                   onClick={() => setSelectedPreset('wav')}
+                  onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), setSelectedPreset('wav'))}
                 >
                   <div className="preset-card-top">
                     <div className="preset-icon-box blue">
@@ -557,7 +571,7 @@ export default function InstantTab({
                     </div>
                     <span className="preset-badge">Uncompressed</span>
                   </div>
-                  <div className="preset-title">WAV Audio (PCM)</div>
+                  <div className="preset-title">WAV Audio</div>
                   <div className="preset-desc">Uncompressed raw PCM waveform ready for DAW studio editing.</div>
                   <div className="preset-specs">
                     <span>Raw PCM</span>
@@ -570,8 +584,12 @@ export default function InstantTab({
 
                 {/* Audio 4: AAC M4A */}
                 <div
+                  role="radio"
+                  tabIndex={0}
+                  aria-checked={selectedPreset === 'aac'}
                   className={`preset-card ${selectedPreset === 'aac' ? 'selected' : ''}`}
                   onClick={() => setSelectedPreset('aac')}
+                  onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), setSelectedPreset('aac'))}
                 >
                   <div className="preset-card-top">
                     <div className="preset-icon-box purple">
@@ -595,8 +613,12 @@ export default function InstantTab({
               <>
                 {/* TikTok Clean */}
                 <div
+                  role="radio"
+                  tabIndex={0}
+                  aria-checked={selectedPreset === 'tiktok_clean'}
                   className={`preset-card ${selectedPreset === 'tiktok_clean' ? 'selected' : ''}`}
                   onClick={() => setSelectedPreset('tiktok_clean')}
+                  onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), setSelectedPreset('tiktok_clean'))}
                 >
                   <div className="preset-card-top">
                     <div className="preset-icon-box cyan">
@@ -604,7 +626,7 @@ export default function InstantTab({
                     </div>
                     <span className="preset-badge cyan">Recommended</span>
                   </div>
-                  <div className="preset-title">Clean Stream (No Watermark)</div>
+                  <div className="preset-title">No-Watermark Video</div>
                   <div className="preset-desc">Original high-bitrate vertical video stream without platform logos.</div>
                   <div className="preset-specs">
                     <span>Original Stream</span>
@@ -617,8 +639,12 @@ export default function InstantTab({
 
                 {/* Full HD 1080p */}
                 <div
+                  role="radio"
+                  tabIndex={0}
+                  aria-checked={selectedPreset === '1080p'}
                   className={`preset-card ${selectedPreset === '1080p' ? 'selected' : ''}`}
                   onClick={() => setSelectedPreset('1080p')}
+                  onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), setSelectedPreset('1080p'))}
                 >
                   <div className="preset-card-top">
                     <div className="preset-icon-box blue">
@@ -626,7 +652,7 @@ export default function InstantTab({
                     </div>
                     <span className="preset-badge">Standard</span>
                   </div>
-                  <div className="preset-title">Full HD 1080p (MP4)</div>
+                  <div className="preset-title">Full HD 1080p</div>
                   <div className="preset-desc">Crisp 1080p resolution optimized for instant playback.</div>
                   <div className="preset-specs">
                     <span>1080p Max</span>
@@ -639,8 +665,12 @@ export default function InstantTab({
 
                 {/* Audio Extract */}
                 <div
+                  role="radio"
+                  tabIndex={0}
+                  aria-checked={selectedPreset === 'mp3_320'}
                   className={`preset-card ${selectedPreset === 'mp3_320' ? 'selected' : ''}`}
                   onClick={() => setSelectedPreset('mp3_320')}
+                  onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), setSelectedPreset('mp3_320'))}
                 >
                   <div className="preset-card-top">
                     <div className="preset-icon-box purple">
@@ -648,7 +678,7 @@ export default function InstantTab({
                     </div>
                     <span className="preset-badge purple">Soundtrack</span>
                   </div>
-                  <div className="preset-title">Audio Only (MP3 320k)</div>
+                  <div className="preset-title">Audio Only</div>
                   <div className="preset-desc">Extract the background sound/music as a standalone MP3 file.</div>
                   <div className="preset-specs">
                     <span>320 kbps</span>
@@ -664,8 +694,12 @@ export default function InstantTab({
               <>
                 {/* Best Video MP4 */}
                 <div
+                  role="radio"
+                  tabIndex={0}
+                  aria-checked={selectedPreset === 'best_video'}
                   className={`preset-card ${selectedPreset === 'best_video' ? 'selected' : ''}`}
                   onClick={() => setSelectedPreset('best_video')}
+                  onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), setSelectedPreset('best_video'))}
                 >
                   <div className="preset-card-top">
                     <div className="preset-icon-box gold">
@@ -673,8 +707,8 @@ export default function InstantTab({
                     </div>
                     <span className="preset-badge gold">Recommended</span>
                   </div>
-                  <div className="preset-title">Best Video (MP4)</div>
-                  <div className="preset-desc">Highest available resolution (up to 4K / 60fps) with AAC stereo audio merged.</div>
+                  <div className="preset-title">Best Quality Video</div>
+                  <div className="preset-desc">Highest available resolution, up to 4K at 60 fps, with stereo audio.</div>
                   <div className="preset-specs">
                     <span>H.264 / Auto</span>
                     <span>•</span>
@@ -686,8 +720,12 @@ export default function InstantTab({
 
                 {/* 1080p MP4 */}
                 <div
+                  role="radio"
+                  tabIndex={0}
+                  aria-checked={selectedPreset === '1080p'}
                   className={`preset-card ${selectedPreset === '1080p' ? 'selected' : ''}`}
                   onClick={() => setSelectedPreset('1080p')}
+                  onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), setSelectedPreset('1080p'))}
                 >
                   <div className="preset-card-top">
                     <div className="preset-icon-box blue">
@@ -695,7 +733,7 @@ export default function InstantTab({
                     </div>
                     <span className="preset-badge">Standard</span>
                   </div>
-                  <div className="preset-title">Full HD 1080p (MP4)</div>
+                  <div className="preset-title">Full HD 1080p</div>
                   <div className="preset-desc">Balanced file size and crystal-clear 1080p quality. Fast download speed.</div>
                   <div className="preset-specs">
                     <span>1080p Max</span>
@@ -708,8 +746,12 @@ export default function InstantTab({
 
                 {/* MP3 Audio */}
                 <div
+                  role="radio"
+                  tabIndex={0}
+                  aria-checked={selectedPreset === 'mp3_320'}
                   className={`preset-card ${selectedPreset === 'mp3_320' ? 'selected' : ''}`}
                   onClick={() => setSelectedPreset('mp3_320')}
+                  onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), setSelectedPreset('mp3_320'))}
                 >
                   <div className="preset-card-top">
                     <div className="preset-icon-box purple">
@@ -717,7 +759,7 @@ export default function InstantTab({
                     </div>
                     <span className="preset-badge purple">Music</span>
                   </div>
-                  <div className="preset-title">MP3 Audio (320 kbps)</div>
+                  <div className="preset-title">MP3 Audio</div>
                   <div className="preset-desc">Extract audio track with embedded artist, title tags and HD album artwork.</div>
                   <div className="preset-specs">
                     <span>320 kbps</span>
@@ -730,8 +772,12 @@ export default function InstantTab({
 
                 {/* Lossless FLAC */}
                 <div
+                  role="radio"
+                  tabIndex={0}
+                  aria-checked={selectedPreset === 'flac'}
                   className={`preset-card ${selectedPreset === 'flac' ? 'selected' : ''}`}
                   onClick={() => setSelectedPreset('flac')}
+                  onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), setSelectedPreset('flac'))}
                 >
                   <div className="preset-card-top">
                     <div className="preset-icon-box green">
@@ -739,7 +785,7 @@ export default function InstantTab({
                     </div>
                     <span className="preset-badge green">Audiophile</span>
                   </div>
-                  <div className="preset-title">Studio FLAC (Lossless)</div>
+                  <div className="preset-title">Studio FLAC</div>
                   <div className="preset-desc">Bit-perfect audio quality without compression artifacts or data loss.</div>
                   <div className="preset-specs">
                     <span>Lossless</span>
@@ -766,7 +812,7 @@ export default function InstantTab({
               {currentActiveJob ? (
                 <button className="btn-secondary" onClick={onNavigateToQueue}>
                   <Layers size={16} />
-                  <span>View in Queue ({currentActiveJob.progress?.percent || 0}%)</span>
+                  <span>View in Queue · {Math.round(currentActiveJob.progress?.percent || 0)}%</span>
                 </button>
               ) : (
                 <button
@@ -777,7 +823,7 @@ export default function InstantTab({
                   <Sparkles size={17} />
                   <span>
                     {mediaInfo?.isPlaylist && playlistMode === 'playlist'
-                      ? `Download Playlist (${mediaInfo.itemCount || 0} ${getItemUnit(selectedPreset, null, { capitalize: true, platform, mediaInfo })})`
+                      ? `Download ${mediaInfo.itemCount || 0} ${getItemUnit(selectedPreset, null, { platform, mediaInfo })}`
                       : 'Download Now'}
                   </span>
                 </button>

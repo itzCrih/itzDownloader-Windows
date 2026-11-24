@@ -44,6 +44,7 @@ temp/
 *.ytdl
 
 # Editor and OS
+.claude/
 .vscode/
 .idea/
 *.suo

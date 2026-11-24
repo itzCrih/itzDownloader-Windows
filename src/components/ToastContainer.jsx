@@ -20,7 +20,7 @@ export default function ToastContainer({ toasts, onDismiss }) {
               {isSuccess && <CheckCircle2 size={18} color="#2ea043" />}
               {isError && <AlertCircle size={18} color="#f85149" />}
               {isWarning && <AlertTriangle size={18} color="#d29922" />}
-              {!isSuccess && !isError && !isWarning && <Info size={18} color="#e6b422" />}
+              {!isSuccess && !isError && !isWarning && <Info size={18} className="icon-accent" />}
             </div>
 
             <div className="toast-message">{toast.message}</div>

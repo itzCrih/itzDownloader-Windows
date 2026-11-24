@@ -4,15 +4,6 @@ import {
   Film,
   Music,
   Settings2,
-  Subtitles,
-  Image as ImageIcon,
-  Gauge,
-  KeyRound,
-  Download,
-  Terminal,
-  ExternalLink,
-  ChevronDown,
-  Layers,
   Sparkles,
   Link2,
   Zap,
@@ -20,6 +11,85 @@ import {
   VolumeX
 } from 'lucide-react';
 import { detectPlatform, validateMediaUrl } from '../utils/platformDetect';
+import Select from '../components/ui/Select';
+import Checkbox from '../components/ui/Checkbox';
+import Toggle from '../components/ui/Toggle';
+import { Collapsible, CollapsibleCard } from '../components/ui/Collapsible';
+
+const CONTAINER_OPTIONS = [
+  { value: 'mp4', label: 'MP4', hint: 'Plays everywhere' },
+  { value: 'mkv', label: 'MKV', hint: 'Multi-track & subtitles' },
+  { value: 'webm', label: 'WebM', hint: 'VP9 / AV1' },
+];
+
+const RESOLUTION_OPTIONS = [
+  { value: 'best', label: 'Best available' },
+  { value: '2160', label: '4K · 2160p' },
+  { value: '1440', label: '2K · 1440p' },
+  { value: '1080', label: 'Full HD · 1080p' },
+  { value: '720', label: 'HD · 720p' },
+  { value: '480', label: 'SD · 480p' },
+  { value: 'custom', label: 'Custom…' },
+];
+
+const SUB_LANG_OPTIONS = [
+  { value: 'all', label: 'All available' },
+  { value: 'en', label: 'English' },
+  { value: 'it', label: 'Italian' },
+  { value: 'es', label: 'Spanish' },
+  { value: 'fr', label: 'French' },
+  { value: 'de', label: 'German' },
+  { value: 'pt', label: 'Portuguese' },
+  { value: 'ja', label: 'Japanese' },
+];
+
+const SUB_MODE_OPTIONS = [
+  { value: 'embed', label: 'Embed in video' },
+  { value: 'external', label: 'Separate .srt files' },
+];
+
+const AUDIO_FORMAT_OPTIONS = [
+  { value: 'mp3', label: 'MP3' },
+  { value: 'flac', label: 'FLAC', hint: 'Lossless' },
+  { value: 'wav', label: 'WAV', hint: 'Uncompressed' },
+  { value: 'm4a', label: 'AAC / M4A' },
+  { value: 'opus', label: 'Opus' },
+  { value: 'vorbis', label: 'OGG Vorbis' },
+];
+
+const BITRATE_OPTIONS = [
+  { value: '320k', label: '320 kbps', hint: 'Maximum' },
+  { value: '256k', label: '256 kbps' },
+  { value: '192k', label: '192 kbps' },
+  { value: '128k', label: '128 kbps', hint: 'Smallest' },
+];
+
+const RATE_OPTIONS = [
+  { value: 'default', label: 'Use global setting' },
+  { value: 'unlimited', label: 'Unlimited' },
+  { value: '25M', label: '25 MB/s' },
+  { value: '10M', label: '10 MB/s' },
+  { value: '5M', label: '5 MB/s' },
+  { value: '2M', label: '2 MB/s' },
+];
+
+const COOKIE_OPTIONS = [
+  { value: 'default', label: 'Use global setting' },
+  { value: 'none', label: 'None' },
+  { value: 'brave', label: 'Brave' },
+  { value: 'firefox', label: 'Firefox' },
+  { value: 'chrome', label: 'Chrome' },
+  { value: 'edge', label: 'Edge' },
+];
+
+const RESOLUTION_PRESETS = [
+  { value: '1920x1080', label: '1920×1080', hint: '16:9' },
+  { value: '1080x1920', label: '1080×1920', hint: '9:16' },
+  { value: '2560x1440', label: '2560×1440', hint: '2K' },
+  { value: '3840x2160', label: '3840×2160', hint: '4K' },
+  { value: '1280x720', label: '1280×720', hint: '720p' },
+  { value: '1080x1080', label: '1080×1080', hint: '1:1' },
+];
 import { formatDuration, getItemUnit } from '../utils/formatters';
 
 export default function StudioTab({
@@ -28,7 +98,6 @@ export default function StudioTab({
   onAddJob,
   onShowToast,
   defaultOutputDir,
-  onNavigateToQueue,
   engineStatus,
   proxySettings,
 }) {
@@ -50,8 +119,8 @@ export default function StudioTab({
   const [downloadSubtitles, setDownloadSubtitles] = useState(false);
   const [subLangs, setSubLangs] = useState('all');
   const [embedSubtitles, setEmbedSubtitles] = useState(true);
-  const [rateLimit, setRateLimit] = useState('unlimited');
-  const [cookiesBrowser, setCookiesBrowser] = useState('none');
+  const [rateLimit, setRateLimit] = useState('default');
+  const [cookiesBrowser, setCookiesBrowser] = useState('default');
   const [extraArgs, setExtraArgs] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
 
@@ -96,7 +165,7 @@ export default function StudioTab({
     setIsInspecting(true);
     try {
       const info = await window.itzDownloaderAPI.inspectUrl(clean, {
-        cookiesBrowser,
+        cookiesBrowser: cookiesBrowser === 'default' ? undefined : cookiesBrowser,
         proxy: proxySettings?.enabled && proxySettings?.url ? proxySettings.url.trim() : null,
       });
       setMediaInfo(info);
@@ -163,8 +232,8 @@ export default function StudioTab({
         downloadSubtitles,
         subLangs,
         embedSubtitles,
-        rateLimit: rateLimit === 'unlimited' ? null : rateLimit,
-        cookiesBrowser: cookiesBrowser === 'none' ? null : cookiesBrowser,
+        rateLimit: rateLimit === 'default' || rateLimit === 'unlimited' ? null : rateLimit,
+        cookiesBrowser: cookiesBrowser === 'default' ? null : cookiesBrowser,
         extraArgs,
       },
       createdAt: Date.now(),
@@ -181,7 +250,7 @@ export default function StudioTab({
       <div className="studio-header-bar">
         <div className="studio-header-left">
           <div className="studio-icon-badge">
-            <Sliders size={18} color="#e6b422" />
+            <Sliders size={18} className="icon-accent" />
           </div>
           <div>
             <h2 className="studio-title">Advanced Media Suite</h2>
@@ -194,7 +263,7 @@ export default function StudioTab({
       <div className="studio-card">
         <div className="card-inner-header">
           <div className="card-title-group">
-            <Link2 size={16} color="#e6b422" />
+            <Link2 size={16} className="icon-accent" />
             <span className="card-title">Target Media Source</span>
           </div>
           {url.trim() && (
@@ -215,9 +284,11 @@ export default function StudioTab({
           <input
             type="text"
             className="form-input"
-            placeholder="Enter media URL (YouTube, TikTok, Instagram, Spotify, Vimeo, Twitter)..."
+            placeholder="Paste a YouTube, TikTok, Instagram, Spotify or Vimeo link…"
             value={url}
+            spellCheck={false}
             onChange={(e) => handleUrlChange(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && url.trim() && !isInspecting && handleInspect()}
           />
           <button
             className="btn-secondary"
@@ -263,393 +334,226 @@ export default function StudioTab({
       {/* Advanced Category Switcher */}
       <div className="studio-type-switcher-bar">
         <button
+          type="button"
+          aria-pressed={mediaType === 'video'}
           className={`type-switch-btn ${mediaType === 'video' ? 'active' : ''}`}
           onClick={() => setMediaType('video')}
         >
           <Film size={18} />
           <div>
-            <div className="type-switch-name">Video & Audio Merged</div>
-            <div className="type-switch-desc">High resolution MP4, MKV, or WebM streams</div>
+            <div className="type-switch-name">Video</div>
+            <div className="type-switch-desc">MP4, MKV or WebM up to 4K</div>
           </div>
         </button>
 
         <button
+          type="button"
+          aria-pressed={mediaType === 'audio'}
           className={`type-switch-btn ${mediaType === 'audio' ? 'active' : ''}`}
           onClick={() => setMediaType('audio')}
         >
           <Music size={18} />
           <div>
-            <div className="type-switch-name">Audio Extraction Only</div>
-            <div className="type-switch-desc">Pure MP3, FLAC, WAV, AAC, or Opus track</div>
+            <div className="type-switch-name">Audio only</div>
+            <div className="type-switch-desc">MP3, FLAC, WAV, AAC or Opus</div>
           </div>
         </button>
       </div>
 
       {/* Video Options Panel */}
       {mediaType === 'video' && (
-        <div className="studio-card">
+        <div className="studio-card panel-swap" key="video-panel">
           <div className="card-inner-header">
             <div className="card-title-group">
-              <Film size={16} color="#e6b422" />
-              <span className="card-title">Video Stream Configuration</span>
+              <Film size={16} className="icon-accent" />
+              <span className="card-title">Video Stream</span>
             </div>
           </div>
 
           <div className="form-grid-2">
-            {/* Container */}
             <div className="form-group">
-              <label className="form-label">Container Format</label>
-              <select
-                className="form-select"
-                value={videoContainer}
-                onChange={(e) => setVideoContainer(e.target.value)}
-              >
-                <option value="mp4">MP4 (Universal compatibility, recommended)</option>
-                <option value="mkv">MKV (Matroska, multi-track & full subtitle support)</option>
-                <option value="webm">WebM (VP9 / AV1 web open container)</option>
-              </select>
-              <span className="form-hint">MP4 is universally recognized on Windows, Apple & Android devices.</span>
+              <span className="form-label">Container format</span>
+              <Select value={videoContainer} onChange={setVideoContainer} options={CONTAINER_OPTIONS} ariaLabel="Container format" />
+              <span className="form-hint">MP4 opens on Windows, Apple and Android devices alike.</span>
             </div>
 
-            {/* Resolution Cap */}
             <div className="form-group">
-              <label className="form-label">Max Resolution Ceiling</label>
-              <select
-                className="form-select"
-                value={resolution}
-                onChange={(e) => setResolution(e.target.value)}
-              >
-                <option value="best">Best Available (Source Master / 4K UHD)</option>
-                <option value="2160">4K UHD (2160p)</option>
-                <option value="1440">2K QHD (1440p)</option>
-                <option value="1080">Full HD (1080p 60fps)</option>
-                <option value="720">HD (720p)</option>
-                <option value="480">Standard SD (480p)</option>
-                <option value="custom">Custom Resolution (Text Input)...</option>
-              </select>
-              <span className="form-hint">Cap the resolution to save disk space, set custom dimensions, or download source master.</span>
+              <span className="form-label">Maximum resolution</span>
+              <Select value={resolution} onChange={setResolution} options={RESOLUTION_OPTIONS} ariaLabel="Maximum resolution" />
+              <span className="form-hint">Cap the resolution to save space, or set exact dimensions.</span>
             </div>
           </div>
 
-          {/* Custom Resolution Input Box (User Requested) */}
-          {resolution === 'custom' && (
-            <div className="custom-resolution-card animate-fadeIn">
+          <Collapsible open={resolution === 'custom'}>
+            <div className="custom-resolution-card">
               <div className="custom-res-header">
                 <div className="custom-res-title-group">
-                  <Sliders size={14} color="#e6b422" />
-                  <span className="custom-res-label">Custom Resolution Specification</span>
+                  <Sliders size={14} className="icon-accent" />
+                  <span className="custom-res-label">Custom resolution</span>
                 </div>
-                <span className="custom-res-badge">Custom Dimensions</span>
               </div>
 
-              <div className="custom-res-input-row">
-                <input
-                  type="text"
-                  className="form-input custom-res-input"
-                  placeholder="e.g. 1920x1080, 1080x1920, 2560x1440, 1080p, 720"
-                  value={customResolution}
-                  onChange={(e) => setCustomResolution(e.target.value)}
-                  autoFocus
-                />
-              </div>
+              <input
+                type="text"
+                className="form-input custom-res-input"
+                placeholder="1920x1080, 1080x1920, 1080p, 720"
+                value={customResolution}
+                spellCheck={false}
+                onChange={(e) => setCustomResolution(e.target.value)}
+              />
 
               <div className="custom-res-chips-row">
-                <span className="custom-chips-label">Presets:</span>
-                <button
-                  type="button"
-                  className={`custom-chip-btn ${customResolution === '1920x1080' ? 'active' : ''}`}
-                  onClick={() => setCustomResolution('1920x1080')}
-                >
-                  1920×1080 (16:9)
-                </button>
-                <button
-                  type="button"
-                  className={`custom-chip-btn ${customResolution === '1080x1920' ? 'active' : ''}`}
-                  onClick={() => setCustomResolution('1080x1920')}
-                >
-                  1080×1920 (9:16 Shorts/TikTok)
-                </button>
-                <button
-                  type="button"
-                  className={`custom-chip-btn ${customResolution === '2560x1440' ? 'active' : ''}`}
-                  onClick={() => setCustomResolution('2560x1440')}
-                >
-                  2560×1440 (2K)
-                </button>
-                <button
-                  type="button"
-                  className={`custom-chip-btn ${customResolution === '3840x2160' ? 'active' : ''}`}
-                  onClick={() => setCustomResolution('3840x2160')}
-                >
-                  3840×2160 (4K)
-                </button>
-                <button
-                  type="button"
-                  className={`custom-chip-btn ${customResolution === '1280x720' ? 'active' : ''}`}
-                  onClick={() => setCustomResolution('1280x720')}
-                >
-                  1280×720 (720p)
-                </button>
-                <button
-                  type="button"
-                  className={`custom-chip-btn ${customResolution === '1080x1080' ? 'active' : ''}`}
-                  onClick={() => setCustomResolution('1080x1080')}
-                >
-                  1080×1080 (1:1)
-                </button>
+                {RESOLUTION_PRESETS.map((p) => (
+                  <button
+                    key={p.value}
+                    type="button"
+                    className={`custom-chip-btn ${customResolution === p.value ? 'active' : ''}`}
+                    onClick={() => setCustomResolution(p.value)}
+                  >
+                    <span>{p.label}</span>
+                    <span className="chip-hint">{p.hint}</span>
+                  </button>
+                ))}
               </div>
 
-              <span className="form-hint" style={{ marginTop: '3px' }}>
-                Enter custom dimensions as width×height (e.g. <code>1920x1080</code>, <code>1080x1920</code>) or vertical height (e.g. <code>1080p</code>, <code>720</code>).
+              <span className="form-hint">
+                Use width×height like <code>1920x1080</code>, or just a height like <code>1080p</code>.
               </span>
             </div>
-          )}
+          </Collapsible>
 
-          {/* Fast Re-encoding Option (User Requested!) */}
-          <div className="reencode-highlight-card">
-            <div className="reencode-highlight-left">
-              <div className="reencode-icon-box">
-                <Zap size={18} color="#e6b422" />
+          <div className="option-tiles">
+            <div className={`option-tile ${fastReencode ? 'is-on' : ''}`}>
+              <div className="option-tile-icon">
+                <Zap size={17} />
               </div>
-              <div>
-                <div className="reencode-title">Fast Re-encoding (FFmpeg H.264 MP4)</div>
-                <div className="reencode-desc">
-                  Re-encodes video stream to standard H.264 MP4 using hardware acceleration
-                  {engineStatus?.hardwareAccels?.nvenc ? ' (NVIDIA NVENC active)' : engineStatus?.hardwareAccels?.qsv ? ' (Intel QSV active)' : ''}.
-                  Guarantees 100% playback on video editors (Premiere, DaVinci, Vegas) and Discord.
+              <div className="option-tile-text">
+                <div className="option-tile-title">Fast re-encode to H.264</div>
+                <div className="option-tile-desc">
+                  Guaranteed playback in Premiere, DaVinci, Vegas and Discord
+                  {engineStatus?.hardwareAccels?.nvenc ? ' · NVENC' : engineStatus?.hardwareAccels?.qsv ? ' · Quick Sync' : engineStatus?.hardwareAccels?.amf ? ' · AMF' : ''}.
                 </div>
               </div>
+              <Toggle checked={fastReencode} onChange={setFastReencode} ariaLabel="Fast re-encode to H.264" />
             </div>
-            <label className="switch">
-              <input
-                type="checkbox"
-                checked={fastReencode}
-                onChange={(e) => setFastReencode(e.target.checked)}
-              />
-              <span className="slider round"></span>
-            </label>
+
+            <div className={`option-tile is-danger ${noAudio ? 'is-on' : ''}`}>
+              <div className="option-tile-icon">
+                <VolumeX size={17} />
+              </div>
+              <div className="option-tile-text">
+                <div className="option-tile-title">No audio</div>
+                <div className="option-tile-desc">Video stream only. Ideal for B-roll and background loops.</div>
+              </div>
+              <Toggle checked={noAudio} onChange={setNoAudio} ariaLabel="No audio" />
+            </div>
           </div>
 
-          {/* No Audio (Mute Video Track) - User Requested */}
-          <div className="reencode-highlight-card" style={{ marginTop: '10px' }}>
-            <div className="reencode-highlight-left">
-              <div
-                className="reencode-icon-box"
-                style={{
-                  background: noAudio ? 'rgba(239, 68, 68, 0.15)' : 'rgba(255, 255, 255, 0.05)',
-                  borderColor: noAudio ? 'rgba(239, 68, 68, 0.35)' : 'rgba(255, 255, 255, 0.08)'
-                }}
-              >
-                <VolumeX size={18} color={noAudio ? '#ef4444' : '#8b949e'} />
-              </div>
-              <div>
-                <div className="reencode-title" style={{ color: noAudio ? '#fca5a5' : '#e6edf3' }}>
-                  No Audio (Mute Video Stream)
-                </div>
-                <div className="reencode-desc">
-                  Downloads only the pure video stream without any audio tracks. Ideal for B-roll, background reels, and video editors.
-                </div>
-              </div>
-            </div>
-            <label className="switch">
-              <input
-                type="checkbox"
-                checked={noAudio}
-                onChange={(e) => setNoAudio(e.target.checked)}
-              />
-              <span className="slider round"></span>
-            </label>
-          </div>
-
-          {/* Subtitles & Cover Art */}
           <div className="form-toggles-row">
-            <label className="form-checkbox-label">
-              <input
-                type="checkbox"
-                checked={embedThumbnail}
-                onChange={(e) => setEmbedThumbnail(e.target.checked)}
-              />
-              <span>Embed HD video thumbnail as file cover art</span>
-            </label>
-
-            <label className="form-checkbox-label">
-              <input
-                type="checkbox"
-                checked={downloadSubtitles}
-                onChange={(e) => setDownloadSubtitles(e.target.checked)}
-              />
-              <span>Download Subtitles & Closed Captions</span>
-            </label>
+            <Checkbox checked={embedThumbnail} onChange={setEmbedThumbnail} label="Embed thumbnail as cover art" />
+            <Checkbox checked={downloadSubtitles} onChange={setDownloadSubtitles} label="Download subtitles" />
           </div>
 
-          {downloadSubtitles && (
+          <Collapsible open={downloadSubtitles}>
             <div className="form-grid-2 nested-sub-box">
               <div className="form-group">
-                <label className="form-label">Subtitle Language</label>
-                <select
-                  className="form-select"
-                  value={subLangs}
-                  onChange={(e) => setSubLangs(e.target.value)}
-                >
-                  <option value="all">All Available Subtitles</option>
-                  <option value="en">English (en)</option>
-                  <option value="it">Italian (it)</option>
-                  <option value="es">Spanish (es)</option>
-                  <option value="fr">French (fr)</option>
-                  <option value="de">German (de)</option>
-                  <option value="ja">Japanese (ja)</option>
-                </select>
+                <span className="form-label">Subtitle language</span>
+                <Select value={subLangs} onChange={setSubLangs} options={SUB_LANG_OPTIONS} ariaLabel="Subtitle language" />
               </div>
-
               <div className="form-group">
-                <label className="form-label">Subtitle Format</label>
-                <select
-                  className="form-select"
+                <span className="form-label">Subtitle output</span>
+                <Select
                   value={embedSubtitles ? 'embed' : 'external'}
-                  onChange={(e) => setEmbedSubtitles(e.target.value === 'embed')}
-                >
-                  <option value="embed">Embed Directly into Video Container</option>
-                  <option value="external">Save as Separate .SRT Files</option>
-                </select>
+                  onChange={(v) => setEmbedSubtitles(v === 'embed')}
+                  options={SUB_MODE_OPTIONS}
+                  ariaLabel="Subtitle output"
+                />
               </div>
             </div>
-          )}
+          </Collapsible>
         </div>
       )}
 
       {/* Audio Options Panel */}
       {mediaType === 'audio' && (
-        <div className="studio-card">
+        <div className="studio-card panel-swap" key="audio-panel">
           <div className="card-inner-header">
             <div className="card-title-group">
-              <Music size={16} color="#e6b422" />
-              <span className="card-title">Audio Track Configuration</span>
+              <Music size={16} className="icon-accent" />
+              <span className="card-title">Audio Track</span>
             </div>
           </div>
 
           <div className="form-grid-2">
-            {/* Audio Format */}
             <div className="form-group">
-              <label className="form-label">Audio Codec / Format</label>
-              <select
-                className="form-select"
-                value={audioFormat}
-                onChange={(e) => setAudioFormat(e.target.value)}
-              >
-                <option value="mp3">MP3 (MPEG Audio Layer III)</option>
-                <option value="flac">FLAC (Free Lossless Audio Codec)</option>
-                <option value="wav">WAV (Uncompressed PCM Studio Master)</option>
-                <option value="m4a">AAC / M4A (Apple & Modern Devices)</option>
-                <option value="opus">Opus (State-of-the-Art Low-Latency)</option>
-                <option value="vorbis">OGG Vorbis</option>
-              </select>
-              <span className="form-hint">FLAC and WAV provide bit-perfect studio reproduction without loss.</span>
+              <span className="form-label">Format</span>
+              <Select value={audioFormat} onChange={setAudioFormat} options={AUDIO_FORMAT_OPTIONS} ariaLabel="Audio format" />
+              <span className="form-hint">FLAC and WAV keep every bit of the original audio.</span>
             </div>
 
-            {/* Bitrate */}
-            {audioFormat === 'mp3' && (
-              <div className="form-group">
-                <label className="form-label">MP3 Quality / Target Bitrate</label>
-                <select
-                  className="form-select"
-                  value={audioBitrate}
-                  onChange={(e) => setAudioBitrate(e.target.value)}
-                >
-                  <option value="320k">320 kbps CBR (Maximum Fidelity)</option>
-                  <option value="256k">256 kbps (High Quality)</option>
-                  <option value="192k">192 kbps (Standard Quality)</option>
-                  <option value="128k">128 kbps (Compact Size)</option>
-                </select>
-                <span className="form-hint">320k matches studio broadcast standards for digital audio.</span>
-              </div>
-            )}
+            <div className={`form-group ${audioFormat === 'mp3' ? '' : 'is-disabled'}`}>
+              <span className="form-label">MP3 bitrate</span>
+              <Select
+                value={audioBitrate}
+                onChange={setAudioBitrate}
+                options={BITRATE_OPTIONS}
+                ariaLabel="MP3 bitrate"
+                disabled={audioFormat !== 'mp3'}
+              />
+              <span className="form-hint">{audioFormat === 'mp3' ? '320 kbps is the highest MP3 quality.' : 'Only applies to MP3.'}</span>
+            </div>
           </div>
 
           <div className="form-toggles-row">
-            <label className="form-checkbox-label">
-              <input
-                type="checkbox"
-                checked={embedThumbnail}
-                onChange={(e) => setEmbedThumbnail(e.target.checked)}
-              />
-              <span>Embed track cover art and ID3 metadata tags (Artist, Title, Year)</span>
-            </label>
+            <Checkbox
+              checked={embedThumbnail}
+              onChange={setEmbedThumbnail}
+              label="Embed cover art and tags"
+              hint="Artist, title and year"
+            />
           </div>
         </div>
       )}
 
-      {/* Advanced Power Settings Accordion */}
-      <div className="studio-card">
-        <div
-          className="card-inner-header clickable"
-          onClick={() => setShowAdvanced(!showAdvanced)}
-        >
-          <div className="card-title-group">
-            <Settings2 size={16} color="#e6b422" />
-            <span className="card-title">Network & Engine Customization</span>
+      {/* Network & Engine Customization (animated accordion) */}
+      <CollapsibleCard
+        open={showAdvanced}
+        onToggle={setShowAdvanced}
+        icon={<Settings2 size={16} className="icon-accent" />}
+        title="Network & Engine Customization"
+        subtitle="Per-download speed limit, cookies and custom yt-dlp flags"
+        badge={(rateLimit !== 'default' || cookiesBrowser !== 'default' || extraArgs.trim())
+          ? <span className="proxy-status-pill active">Custom</span>
+          : null}
+      >
+        <div className="form-grid-2">
+          <div className="form-group">
+            <span className="form-label">Speed limit</span>
+            <Select value={rateLimit} onChange={setRateLimit} options={RATE_OPTIONS} ariaLabel="Speed limit" />
+            <span className="form-hint">Overrides the global bandwidth limit for this download.</span>
           </div>
-          <ChevronDown
-            size={16}
-            style={{
-              transform: showAdvanced ? 'rotate(180deg)' : 'rotate(0deg)',
-              transition: 'transform 0.2s ease',
-            }}
-          />
+
+          <div className="form-group">
+            <span className="form-label">Browser cookies</span>
+            <Select value={cookiesBrowser} onChange={setCookiesBrowser} options={COOKIE_OPTIONS} ariaLabel="Browser cookies" />
+            <span className="form-hint">Unlocks age-restricted or members-only videos with your browser session.</span>
+          </div>
         </div>
 
-        {showAdvanced && (
-          <div className="advanced-options-body">
-            <div className="form-grid-2">
-              {/* Speed Limit */}
-              <div className="form-group">
-                <label className="form-label">Bandwidth Throttle / Rate Limit</label>
-                <select
-                  className="form-select"
-                  value={rateLimit}
-                  onChange={(e) => setRateLimit(e.target.value)}
-                >
-                  <option value="unlimited">Unlimited (Maximum Connection Speed)</option>
-                  <option value="25M">25 MB/s (High Speed)</option>
-                  <option value="10M">10 MB/s (Balanced)</option>
-                  <option value="5M">5 MB/s (Quiet Background)</option>
-                  <option value="2M">2 MB/s (Low Bandwidth)</option>
-                </select>
-                <span className="form-hint">Prevents downloading from saturating your home network.</span>
-              </div>
-
-              {/* Browser Cookies */}
-              <div className="form-group">
-                <label className="form-label">Browser Cookies Integration</label>
-                <select
-                  className="form-select"
-                  value={cookiesBrowser}
-                  onChange={(e) => setCookiesBrowser(e.target.value)}
-                >
-                  <option value="none">None (Public anonymous access)</option>
-                  <option value="chrome">Google Chrome (Age-restricted & logged-in content)</option>
-                  <option value="firefox">Mozilla Firefox</option>
-                  <option value="edge">Microsoft Edge</option>
-                  <option value="brave">Brave Browser</option>
-                </select>
-                <span className="form-hint">Automatically bypasses YouTube 18+ sign-in walls using your browser session.</span>
-              </div>
-            </div>
-
-            {/* Custom Arguments */}
-            <div className="form-group" style={{ marginTop: '14px' }}>
-              <label className="form-label">Custom yt-dlp Flags (Power User)</label>
-              <input
-                type="text"
-                className="form-input form-mono"
-                placeholder="--no-playlist --geo-bypass --concurrent-fragments 4"
-                value={extraArgs}
-                onChange={(e) => setExtraArgs(e.target.value)}
-              />
-              <span className="form-hint">Direct flags passed to yt-dlp runtime. Arguments with execution rights are blocked for security.</span>
-            </div>
-          </div>
-        )}
-      </div>
+        <div className="form-group" style={{ marginTop: 14 }}>
+          <label className="form-label" htmlFor="studio-extra-args">Custom yt-dlp flags</label>
+          <input
+            id="studio-extra-args"
+            type="text"
+            className="form-input form-mono"
+            placeholder="--geo-bypass --concurrent-fragments 8"
+            value={extraArgs}
+            spellCheck={false}
+            onChange={(e) => setExtraArgs(e.target.value)}
+          />
+          <span className="form-hint">Passed directly to yt-dlp. Flags that run programs, read files or change the output path are blocked.</span>
+        </div>
+      </CollapsibleCard>
 
       {/* Action Footer */}
       <div className="studio-action-bar">
@@ -669,8 +573,8 @@ export default function StudioTab({
             <Sparkles size={17} />
             <span>
               {mediaInfo?.isPlaylist
-                ? `Start Advanced Download (${mediaInfo.itemCount || 0} ${mediaType === 'video' ? 'Videos' : 'Tracks'})`
-                : 'Start Advanced Download'}
+                ? `Download ${mediaInfo.itemCount || 0} ${mediaType === 'video' ? 'videos' : 'tracks'}`
+                : 'Start download'}
             </span>
           </button>
         </div>

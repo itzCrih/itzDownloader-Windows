@@ -20,6 +20,7 @@ import {
   Clock,
   ExternalLink
 } from 'lucide-react';
+import { Collapsible } from '../components/ui/Collapsible';
 import { formatBytes, formatDuration, getItemUnit } from '../utils/formatters';
 
 export default function QueueTab({
@@ -92,7 +93,7 @@ export default function QueueTab({
       <div className="queue-header-bar">
         <div className="queue-header-left">
           <div className="queue-icon-badge">
-            <Layers size={18} color="#e6b422" />
+            <Layers size={18} className="icon-accent" />
           </div>
           <div>
             <h2 className="queue-title">Download Queue & History</h2>
@@ -116,7 +117,7 @@ export default function QueueTab({
       {jobs.length === 0 && (
         <div className="empty-queue-card">
           <div className="empty-icon-box">
-            <DownloadCloud size={48} color="rgba(230, 180, 34, 0.4)" />
+            <DownloadCloud size={48} className="icon-accent icon-faded" />
           </div>
           <h3 className="empty-title">Queue is empty</h3>
           <p className="empty-desc">
@@ -156,7 +157,7 @@ export default function QueueTab({
                       <img src={job.thumbnail} alt={job.title} className="queue-thumb-img" />
                     ) : (
                       <div className="queue-thumb-fallback">
-                        <ListMusic size={26} color="#e6b422" />
+                        <ListMusic size={26} className="icon-accent" />
                       </div>
                     )}
 
@@ -288,7 +289,7 @@ export default function QueueTab({
                       onClick={() => togglePlaylist(job.jobId)}
                     >
                       <div className="playlist-tracklist-toggle-left">
-                        <ListMusic size={14} color="#e6b422" />
+                        <ListMusic size={14} className="icon-accent" />
                         <span>{getItemUnit(job.preset, job.customOptions, { capitalize: true })} in Queue ({job.items.length})</span>
                       </div>
                       <div className="playlist-tracklist-toggle-right">
@@ -443,15 +444,15 @@ export default function QueueTab({
                       </button>
                     </div>
 
-                    {isLogOpen && (
+                    <Collapsible open={isLogOpen}>
                       <div className="queue-log-terminal">
-                        {job.logs.map((line, idx) => (
+                        {isLogOpen && job.logs.map((line, idx) => (
                           <div key={idx} className="terminal-log-line">
                             {line}
                           </div>
                         ))}
                       </div>
-                    )}
+                    </Collapsible>
                   </div>
                 )}
               </div>
@@ -469,9 +470,9 @@ export default function QueueTab({
                   ) : (
                     <div className="queue-thumb-fallback">
                       {job.preset?.includes('mp3') || job.preset === 'flac' ? (
-                        <Music size={24} color="#e6b422" />
+                        <Music size={24} className="icon-accent" />
                       ) : (
-                        <Film size={24} color="#e6b422" />
+                        <Film size={24} className="icon-accent" />
                       )}
                     </div>
                   )}
@@ -648,15 +649,15 @@ export default function QueueTab({
                     </button>
                   </div>
 
-                  {isLogOpen && (
+                  <Collapsible open={isLogOpen}>
                     <div className="queue-log-terminal">
-                      {job.logs.map((line, idx) => (
+                      {isLogOpen && job.logs.map((line, idx) => (
                         <div key={idx} className="terminal-log-line">
                           {line}
                         </div>
                       ))}
                     </div>
-                  )}
+                  </Collapsible>
                 </div>
               )}
             </div>
